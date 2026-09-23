@@ -1,0 +1,27 @@
+services:
+  immich-jellyfin-sync:
+    image: ghcr.io/m-a-johnson/immich-jellyfin-sync:latest
+    container_name: immich-jellyfin-sync
+    user: "99:100"
+    environment:
+      - TZ=America/Edmonton
+    volumes:
+      - /mnt/user/appdata/immich-jellyfin-sync:/config
+      - /mnt/user/media/immich-sync:/output
+    networks:
+      - main_network
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.immich-jellyfin-sync.rule=Host(`immich-jellyfin-sync.main.johnsoritti.com`)
+      - traefik.http.routers.immich-jellyfin-sync.entrypoints=websecure
+      - traefik.http.routers.immich-jellyfin-sync.middlewares=<your-authentik-chain>@file
+      - traefik.http.services.immich-jellyfin-sync.loadbalancer.server.port=8080
+
+networks:
+  main_network:
+    external: true
+
+# Jellyfin (media_manage stack) needs:
+#   - /mnt/user/images/Immich:/immich:ro
+#   - /mnt/user/media/immich-sync:/immich-sync
