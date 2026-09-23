@@ -1,22 +1,96 @@
+"""Entry point.
+
+  (no args)          run the sync loop (container default)
+  sync [--dry-run]   one sync pass
+  albums             list Immich albums and which are enabled
+  enable ALBUM       enable an album by id or exact name
+  disable ALBUM      disable an album (its files are removed on the next sync)
+"""
+import argparse
 import logging
+import signal
 import sys
+import threading
 
 from . import __version__, config
+from .immich import ImmichClient, ImmichError
+from .state import State
+from .sync import Syncer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("immich_jellyfin_sync")
 
 
-def main() -> int:
-    log.info("immich-jellyfin-sync %s starting", __version__)
+def _find_album(client: ImmichClient, query: str):
+    albums = client.albums()
+    exact = [a for a in albums if a.id == query] or [a for a in albums if a.name.casefold() == query.casefold()]
+    if len(exact) == 1:
+        return exact[0]
+    if not exact:
+        raise SystemExit(f"no album matches {query!r} (run 'albums' to list them)")
+    ids = ", ".join(f"{a.name} [{a.id}]" for a in exact)
+    raise SystemExit(f"{query!r} matches several albums, use the id: {ids}")
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="immich_jellyfin_sync")
+    sub = ap.add_subparsers(dest="cmd")
+    s = sub.add_parser("sync")
+    s.add_argument("--dry-run", action="store_true")
+    sub.add_parser("albums")
+    for name in ("enable", "disable"):
+        sub.add_parser(name).add_argument("album")
+    args = ap.parse_args(argv)
+
+    log.info("immich-jellyfin-sync %s", __version__)
     try:
         cfg = config.load()
     except config.ConfigError as e:
         log.error("config error: %s", e)
         return 2
-    log.info("config ok: immich=%s output=%s jellyfin=%s",
-             cfg.immich.url, cfg.paths.output, cfg.jellyfin.url if cfg.jellyfin else "disabled")
-    # Step 1 (sync engine) goes here.
+
+    client = ImmichClient(cfg.immich.url, cfg.immich.api_key)
+    state = State(config.state_path())
+    try:
+        if args.cmd == "albums":
+            enabled = state.enabled_album_ids()
+            for a in sorted(client.albums(), key=lambda a: a.name.casefold()):
+                print(f"[{'x' if a.id in enabled else ' '}] {a.name}  ({a.asset_count} assets)  {a.id}")
+            return 0
+        if args.cmd in ("enable", "disable"):
+            a = _find_album(client, args.album)
+            state.set_enabled(a.id, a.name, args.cmd == "enable")
+            print(f"{args.cmd}d {a.name!r}; run 'sync' or wait for the next pass")
+            return 0
+        if args.cmd == "sync":
+            report = Syncer(client, state, cfg.paths, dry_run=args.dry_run).run()
+            log.info("sync done: %s", report)
+            return 1 if report.failed_albums else 0
+        return _loop(client, state, cfg)
+    except ImmichError as e:
+        log.error("Immich error: %s", e)
+        return 1
+    finally:
+        state.close()
+        client.close()
+
+
+def _loop(client, state, cfg) -> int:
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
+    interval = cfg.sync_interval_minutes * 60
+    log.info("sync loop every %d min; output=%s", cfg.sync_interval_minutes, cfg.paths.output)
+    while not stop.is_set():
+        try:
+            log.info("sync done: %s", Syncer(client, state, cfg.paths).run())
+        except ImmichError as e:
+            log.error("sync skipped, Immich unavailable: %s", e)
+        except Exception:
+            log.exception("sync failed")
+        stop.wait(interval)
+    log.info("stopping")
     return 0
 
 

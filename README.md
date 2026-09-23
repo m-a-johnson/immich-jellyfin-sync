@@ -27,6 +27,31 @@ Immich album "Camping 2019"
 
 The container records every file it creates (symlink, poster, `folder.jpg`) and the Immich asset it came from. Cleanup only ever deletes files in that record. Files it didn't create are never touched, even inside its own output folder, and a misconfigured output path can't wipe unrelated media.
 
+## Usage (step 1: no web UI yet)
+
+Album selection is done from the CLI until the web UI lands:
+
+```bash
+docker exec immich-jellyfin-sync python -m immich_jellyfin_sync albums          # list; [x] = enabled
+docker exec immich-jellyfin-sync python -m immich_jellyfin_sync enable "Wedding" # by exact name or id
+docker exec immich-jellyfin-sync python -m immich_jellyfin_sync sync --dry-run   # show what would change
+docker exec immich-jellyfin-sync python -m immich_jellyfin_sync sync             # one pass now
+```
+
+The container's default command runs a sync every `sync_interval_minutes`.
+
+Links are named `<local date> <original name> [<asset id prefix>].<ext>`, e.g.
+`2018-07-28 Tanis & Mark Wedding [cf7586e2].mp4`. `originalPath` is used verbatim as the
+link target (Immich's storage template can write names like `Tanis &amp; Mark Wedding.mp4`
+to disk; that is the real file name and must not be decoded).
+
+## Immich compatibility
+
+Requires Immich **v3+**. v3 removed `assets` from album responses, so album contents come from
+`POST /api/search/metadata` with `albumIds`. Only `timeline` and `archive` visibility videos are
+synced (v3 search returns all visibilities when none is given, which would include hidden
+Live Photo motion clips).
+
 ## Requirements
 
 - Immich API key with **album read** and **asset read** only

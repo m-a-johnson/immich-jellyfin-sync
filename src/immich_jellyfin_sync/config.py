@@ -83,3 +83,8 @@ def load(path: Path = CONFIG_PATH) -> Config:
         ),
         sync_interval_minutes=interval,
     )
+
+
+def state_path() -> Path:
+    """State DB lives next to config.yaml unless IJS_STATE is set."""
+    return Path(os.environ.get("IJS_STATE", str(CONFIG_PATH.parent / "state.db")))
