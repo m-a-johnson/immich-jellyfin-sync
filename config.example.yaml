@@ -2,9 +2,10 @@
 immich:
   url: http://immich_server:2283
   api_key_file: /config/immich_key      # album.read + asset.read + asset.view
-jellyfin:
+jellyfin:                             # optional: tells Jellyfin about changes right away
   url: http://jellyfin:8096
-  api_key_file: /config/jellyfin_key    # used for poster refresh (step 3)
+  api_key_file: /config/jellyfin_key    # Jellyfin Dashboard > API Keys
+  library_path: /immich-sync            # paths.output as mounted in Jellyfin
 paths:
   immich_prefix: /data        # originalPath prefix inside the Immich container
   jellyfin_prefix: /immich    # where Jellyfin mounts Immich's storage (read-only)

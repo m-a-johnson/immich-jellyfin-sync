@@ -15,14 +15,18 @@ CREATE TABLE IF NOT EXISTS files (      -- paths relative to paths.output
     path     TEXT PRIMARY KEY,
     album_id TEXT NOT NULL,
     asset_id TEXT,
-    kind     TEXT NOT NULL,              -- 'video' (step 1); 'poster'/'cover' later
-    target   TEXT
+    kind     TEXT NOT NULL,              -- 'video' | 'poster' | 'cover'
+    target   TEXT                        -- symlink target (video) or sha256 of what we wrote (images)
 );
 CREATE TABLE IF NOT EXISTS posters (   -- chosen in the web UI; written to disk in step 3
     album_id       TEXT NOT NULL,
     video_asset_id TEXT NOT NULL,
     photo_asset_id TEXT NOT NULL,
     PRIMARY KEY (album_id, video_asset_id)
+);
+CREATE TABLE IF NOT EXISTS covers (    -- folder image chosen in the web UI (else Immich's album cover)
+    album_id       TEXT PRIMARY KEY,
+    photo_asset_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS dirs (
     path     TEXT PRIMARY KEY,
@@ -109,4 +113,17 @@ class State:
             self.db.execute(
                 "INSERT OR REPLACE INTO posters (album_id, video_asset_id, photo_asset_id) VALUES (?, ?, ?)",
                 (album_id, video_id, photo_id))
+        self.db.commit()
+
+    # folder image override
+    def cover(self, album_id: str) -> str | None:
+        r = self.db.execute("SELECT photo_asset_id FROM covers WHERE album_id = ?", (album_id,)).fetchone()
+        return r[0] if r else None
+
+    def set_cover(self, album_id: str, photo_id: str | None) -> None:
+        if photo_id is None:
+            self.db.execute("DELETE FROM covers WHERE album_id = ?", (album_id,))
+        else:
+            self.db.execute("INSERT OR REPLACE INTO covers (album_id, photo_asset_id) VALUES (?, ?)",
+                            (album_id, photo_id))
         self.db.commit()

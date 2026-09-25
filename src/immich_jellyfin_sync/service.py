@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from .config import Config
 from .immich import ImmichError
+from .jellyfin import JellyfinError, notify
 from .state import State
 from .sync import Syncer
 
@@ -14,9 +15,10 @@ log = logging.getLogger(__name__)
 
 
 class SyncService:
-    def __init__(self, cfg: Config, client, state_path):
+    def __init__(self, cfg: Config, client, state_path, jellyfin=None):
         self.cfg = cfg
         self.client = client
+        self.jellyfin = jellyfin               # JellyfinClient or None
         self.state_path = state_path
         self._run_lock = threading.Lock()      # one sync at a time
         self._wake = threading.Event()
@@ -32,17 +34,18 @@ class SyncService:
             try:
                 r = Syncer(self.client, state, self.cfg.paths).run()
                 log.info("sync done: %s", r)
-                self.last = {"ok": not r.failed_albums, "summary": str(r), "error": None,
-                             "created": r.created, "removed": r.removed, "linked": r.created + r.unchanged + r.replaced,
-                             "failed_albums": r.failed_albums}
+                jf_error = self._tell_jellyfin(r)
+                self.last = {"ok": not r.failed_albums and not jf_error, "summary": str(r), "error": None,
+                             "created": r.created, "removed": r.removed, "linked": r.linked,
+                             "failed_albums": r.failed_albums, "jellyfin_error": jf_error}
             except ImmichError as e:
                 log.error("sync skipped, Immich unavailable: %s", e)
                 self.last = {"ok": False, "summary": "", "error": f"Couldn't reach Immich: {e}",
-                             "created": 0, "removed": 0, "linked": None, "failed_albums": []}
+                             "created": 0, "removed": 0, "linked": None, "failed_albums": [], "jellyfin_error": None}
             except Exception as e:  # noqa: BLE001 - keep the loop alive
                 log.exception("sync failed")
                 self.last = {"ok": False, "summary": "", "error": f"Sync failed: {e}",
-                             "created": 0, "removed": 0, "linked": None, "failed_albums": []}
+                             "created": 0, "removed": 0, "linked": None, "failed_albums": [], "jellyfin_error": None}
             finally:
                 self.last["finished"] = datetime.now(timezone.utc).isoformat()
                 self.running = False
@@ -52,6 +55,19 @@ class SyncService:
                         self.on_sync()
                     except Exception:  # noqa: BLE001
                         log.exception("on_sync callback failed")
+
+    def _tell_jellyfin(self, r) -> str | None:
+        if self.jellyfin is None or not (r.created_links or r.removed_links or r.images_changed):
+            return None
+        try:
+            res = notify(self.jellyfin, r.created_links, r.removed_links, r.images_changed)
+            log.info("told Jellyfin: %d path update(s), %d image refresh(es)", res.announced, res.refreshed)
+            if res.not_found:
+                log.info("not in Jellyfin yet (will get images on first scan): %s", res.not_found)
+            return None
+        except JellyfinError as e:
+            log.warning("couldn't tell Jellyfin about changes: %s", e)
+            return f"Couldn't reach Jellyfin: {e}"
 
     def trigger(self) -> None:
         """Ask the loop to sync now (returns immediately)."""

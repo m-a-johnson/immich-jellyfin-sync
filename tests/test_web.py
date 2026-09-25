@@ -139,3 +139,22 @@ def test_video_count_failure_is_null_and_not_cached(ctx):
     assert c.get("/api/video-counts").json() == {AID: None}
     fake.album_videos = lambda album_id: [mk(VID, "VIDEO")]
     assert c.get("/api/video-counts").json() == {AID: 1}
+
+
+def test_folder_image_choice_validated_and_triggers_sync(ctx):
+    c, fake, svc, db = ctx
+    url = f"/api/albums/{AID}/cover"
+    assert c.put(url, json={"photoId": "44444444-nope"}, headers=H).status_code == 400
+    r = c.put(url, json={"photoId": PID}, headers=H).json()
+    assert r == {"albumId": AID, "folderImageId": PID, "folderImageChosen": True}
+    assert svc.triggered == 1
+    a = c.get(f"/api/albums/{AID}").json()
+    assert a["folderImageChosen"] is True
+    r = c.put(url, json={"photoId": None}, headers=H).json()
+    assert r["folderImageChosen"] is False and r["folderImageId"] == PID   # falls back to Immich's cover
+
+
+def test_poster_choice_triggers_sync(ctx):
+    c, fake, svc, db = ctx
+    c.put(f"/api/albums/{AID}/videos/{VID}/poster", json={"photoId": PID}, headers=H)
+    assert svc.triggered == 1

@@ -32,7 +32,7 @@ The container records every file it creates (symlink, poster, `folder.jpg`) and 
 Open the container on port 8080 (put it behind Traefik + Authentik; it has no login of its own).
 
 - **Albums**: every Immich album as a slide mount; turn on **In Jellyfin** to sync its videos. Albums in Jellyfin are circled.
-- **Album page**: its videos, and **Choose poster** to pick one of the album's photos for a video. Poster choices are stored now and written for Jellyfin in step 3.
+- **Album page**: its videos; **Choose poster** picks one of the album's photos for a video (default: Jellyfin's own screen grab), and **Change folder image** picks the album folder's image (default: the album's Immich cover).
 - **Sync now** runs a pass immediately; turning an album on or off also triggers one.
 
 ## CLI
@@ -53,6 +53,33 @@ Links are named `<local date> <original name> [<asset id prefix>].<ext>`, e.g.
 link target (Immich's storage template can write names like `Tanis &amp; Mark Wedding.mp4`
 to disk; that is the real file name and must not be decoded).
 
+## Images
+
+Confirmed on Jellyfin 12.1 (Home Videos and Photos library):
+
+| Image | File |
+|---|---|
+| Album folder | `folder.jpg` |
+| Video | `<video file name without extension>.jpg` |
+
+Images are Immich's preview size, converted to JPEG if Immich serves WebP, and written atomically.
+The sha256 of each image is recorded; if you replace one with your own file, it is never
+overwritten or deleted. If a chosen photo leaves the album, the choice is cleared and the default
+comes back.
+
+## Jellyfin
+
+With a `jellyfin:` section in `config.yaml`, each sync tells Jellyfin about new and removed videos
+(`POST /Library/Media/Updated`) and refreshes the images of items whose image changed
+(`POST /Items/{id}/Refresh` with `replaceAllImages=true`). Jellyfin 12 only accepts the
+`Authorization: MediaBrowser Token="..."` header; the old `X-Emby-Token` / `api_key` are gone.
+
+Test the connection without changing anything:
+
+```bash
+docker exec immich-jellyfin-sync python -m immich_jellyfin_sync jellyfin-check
+```
+
 ## Immich compatibility
 
 Requires Immich **v3+**. v3 removed `assets` from album responses, so album contents come from
@@ -63,7 +90,7 @@ Live Photo motion clips).
 ## Requirements
 
 - Immich API key with **album.read**, **asset.read** and **asset.view** only (asset.view is for thumbnails in the web UI)
-- Jellyfin API key (step 3, for poster refresh)
+- Jellyfin API key (optional; Dashboard > API Keys) so changes show up without waiting for a library scan
 - Jellyfin must mount Immich's storage **read-only** at `paths.jellyfin_prefix`, and this container's output folder as its library
 - Put the web UI behind authentication (e.g. Traefik + Authentik); it holds API keys
 

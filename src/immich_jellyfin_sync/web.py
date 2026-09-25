@@ -82,6 +82,10 @@ class PosterBody(BaseModel):
     photoId: str | None = None
 
 
+class CoverBody(BaseModel):
+    photoId: str | None = None
+
+
 def create_app(client, state_path, service) -> FastAPI:
     app = FastAPI(title="immich-jellyfin-sync", docs_url=None, redoc_url=None, openapi_url=None)
     counts = VideoCounts(client)
@@ -112,7 +116,8 @@ def create_app(client, state_path, service) -> FastAPI:
 
     @app.get("/api/status")
     def status():
-        return {"running": service.running, "last": service.last}
+        return {"running": service.running, "last": service.last,
+                "jellyfin": getattr(service, "jellyfin", None) is not None}
 
     @app.post("/api/sync", dependencies=[Depends(_same_origin)])
     def sync_now():
@@ -145,8 +150,10 @@ def create_app(client, state_path, service) -> FastAPI:
         videos = [v for v in immich(client.album_videos, a.id) if v.syncable]
         videos.sort(key=lambda v: v.local_date_time)
         posters = state.posters(a.id)
+        override = state.cover(a.id)
         return {
             "id": a.id, "name": a.name, "coverId": a.cover_asset_id,
+            "folderImageId": override or a.cover_asset_id, "folderImageChosen": override is not None,
             "enabled": a.id in state.enabled_album_ids(),
             "videos": [{"id": v.id, "title": v.title, "date": v.local_date_time[:10],
                         "durationMs": v.duration_ms, "posterId": posters.get(v.id)} for v in videos],
@@ -169,7 +176,20 @@ def create_app(client, state_path, service) -> FastAPI:
             if not any(p.id == body.photoId and p.visible for p in immich(client.album_photos, album_id)):
                 raise HTTPException(400, "Posters must be photos from the same album")
         state.set_poster(album_id, video_id, body.photoId)
+        service.trigger()
         return {"videoId": video_id, "posterId": body.photoId}
+
+    @app.put("/api/albums/{album_id}/cover", dependencies=[Depends(_same_origin)])
+    def set_cover(album_id: str, body: CoverBody, state: State = Depends(db)):
+        a = find_album(_check_id(album_id))
+        if body.photoId is not None:
+            _check_id(body.photoId)
+            if not any(p.id == body.photoId and p.visible for p in immich(client.album_photos, a.id)):
+                raise HTTPException(400, "The folder image must be a photo from the same album")
+        state.set_cover(a.id, body.photoId)
+        service.trigger()
+        return {"albumId": a.id, "folderImageId": body.photoId or a.cover_asset_id,
+                "folderImageChosen": body.photoId is not None}
 
     @app.get("/api/thumb/{asset_id}")
     def thumb(asset_id: str, size: str = "thumbnail"):

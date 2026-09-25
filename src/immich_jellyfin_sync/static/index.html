@@ -90,7 +90,13 @@ header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; m
 /* album view */
 .albumhead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 8px 0 6px; }
 .albumhead h2 { font-size: 1.35rem; margin: 0; font-weight: 650; flex: 1 1 auto; }
-.note { color: var(--ink-soft); font-size: 0.87rem; margin: 0 0 24px; max-width: 70ch; }
+.note { color: var(--ink-soft); font-size: 0.87rem; margin: 0 0 18px; max-width: 70ch; }
+.folderimg { display: flex; align-items: center; gap: 14px; margin: 0 0 26px; }
+.folderimg .thumb { position: relative; width: 96px; aspect-ratio: 16/9; background: var(--window); border: 5px solid var(--mount); outline: 1px solid var(--mount-edge); }
+.folderimg .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.folderimg .thumb .pencil { top: -12px; left: -12px; width: calc(100% + 24px); height: calc(100% + 24px); }
+.folderimg .label { font-size: 0.87rem; color: var(--ink-soft); }
+.folderimg .label strong { display: block; color: var(--ink); font-weight: 600; }
 .videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
 .video {
   display: grid; grid-template-columns: 176px 1fr auto; gap: 16px; align-items: center;
@@ -250,6 +256,11 @@ async function refreshStatus() {
       el.textContent = `Last sync ${at}: couldn't read ${s.last.failed_albums.join(", ")}`;
       return;
     }
+    if (s.last.jellyfin_error) {
+      el.classList.add("bad");
+      el.textContent = `Synced ${at}, but ${s.last.jellyfin_error.charAt(0).toLowerCase()}${s.last.jellyfin_error.slice(1)}`;
+      return;
+    }
     const n = s.last.linked;
     el.textContent = `Last synced ${at}, ${n} video${n === 1 ? "" : "s"} in Jellyfin`;
   } catch { el.classList.add("bad"); el.textContent = "Can't reach this app's server"; }
@@ -339,11 +350,38 @@ async function showAlbum(id) {
       const pic = v.posterId
         ? h("div", { class: "thumb" }, img(v.posterId, "Chosen poster"), pencil(animate))
         : h("span", { class: "auto" }, "Screen grab");
-      cell.replaceChildren(pic, h("button", { class: "btn", type: "button", onclick: () => openPicker(a, v, draw) },
+      cell.replaceChildren(pic, h("button", { class: "btn", type: "button", onclick: () => openPicker({
+          album: a, title: "Choose a poster", currentId: v.posterId,
+          intro: `For “${v.title}”. Pick a photo from “${a.name}”.`, clearLabel: "Use screen grab",
+          save: async (photoId) => {
+            await api("PUT", `api/albums/${a.id}/videos/${v.id}/poster`, { photoId });
+            v.posterId = photoId; draw(Boolean(photoId));
+            toast(photoId ? "Poster saved. Sending it to Jellyfin…" : "Going back to the screen grab");
+            setTimeout(refreshStatus, 2000);
+          } }) },
         v.posterId ? "Change poster" : "Choose poster"));
     };
     draw(false);
     return cell;
+  };
+
+  const folderRow = () => {
+    const row = h("div", { class: "folderimg" });
+    const draw = (animate) => row.replaceChildren(
+      h("div", { class: "thumb" }, img(a.folderImageId, "Folder image"), a.folderImageChosen ? pencil(animate) : null),
+      h("div", { class: "label" }, h("strong", {}, "Folder image in Jellyfin"),
+        a.folderImageChosen ? "A photo you chose" : a.folderImageId ? "The album cover from Immich" : "None: the album has no cover"),
+      h("button", { class: "btn", type: "button", onclick: () => openPicker({
+          album: a, title: "Choose a folder image", currentId: a.folderImageChosen ? a.folderImageId : null,
+          intro: `Shown on the “${a.name}” folder in Jellyfin.`, clearLabel: "Use Immich album cover",
+          save: async (photoId) => {
+            const r = await api("PUT", `api/albums/${a.id}/cover`, { photoId });
+            a.folderImageId = r.folderImageId; a.folderImageChosen = r.folderImageChosen; draw(r.folderImageChosen);
+            toast(photoId ? "Folder image saved. Sending it to Jellyfin…" : "Going back to the Immich album cover");
+            setTimeout(refreshStatus, 2000);
+          } }) }, "Change folder image"));
+    draw(false);
+    return row;
   };
 
   const list = a.videos.length
@@ -372,18 +410,28 @@ async function showAlbum(id) {
       })),
     h("p", { class: "note" },
       `${a.videos.length} video${a.videos.length === 1 ? "" : "s"}. `,
-      "Posters you choose are saved now; Jellyfin keeps showing screen grabs until poster support is added in the next update."),
+      "Videos without a chosen poster use a frame Jellyfin picks from the video."),
+    folderRow(),
     list);
 }
 
-/* ---------- poster picker ---------- */
-async function openPicker(album, video, redraw) {
-  const dlg = $("#picker"), sheet = $("#sheet"), use = $("#usePhoto");
-  let chosen = video.posterId;
-  $("#pickerFor").textContent = `For “${video.title}”. Pick a photo from “${album.name}”.`;
+/* ---------- photo picker (posters and folder images) ---------- */
+async function openPicker({ album, title, intro, currentId, clearLabel, save }) {
+  const dlg = $("#picker"), sheet = $("#sheet"), use = $("#usePhoto"), clear = $("#useGrab");
+  let chosen = currentId;
+  $("#pickerTitle").textContent = title;
+  $("#pickerFor").textContent = intro;
+  clear.textContent = clearLabel;
   sheet.replaceChildren(h("p", { class: "empty" }, "Loading photos…"));
   use.disabled = !chosen;
   dlg.showModal();
+
+  const run = async (photoId) => {
+    try { await save(photoId); dlg.close(); }
+    catch (e) { toast(e.message); }
+  };
+  use.onclick = () => run(chosen);
+  clear.onclick = () => run(null);
 
   let photos;
   try { photos = await api("GET", `api/albums/${encodeURIComponent(album.id)}/photos`); }
@@ -406,18 +454,6 @@ async function openPicker(album, video, redraw) {
       class: "frame-pick", type: "button", role: "radio", "data-id": p.id, "aria-label": `Photo from ${fmtDate(p.date)}`,
       onclick: () => { chosen = p.id; mark(); } }, img(p.id, ""))));
   mark();
-
-  const save = async (photoId) => {
-    try {
-      await api("PUT", `api/albums/${album.id}/videos/${video.id}/poster`, { photoId });
-      video.posterId = photoId;
-      redraw(Boolean(photoId));
-      dlg.close();
-      toast(photoId ? "Poster saved" : "Using the screen grab");
-    } catch (e) { toast(e.message); }
-  };
-  use.onclick = () => save(chosen);
-  $("#useGrab").onclick = () => save(null);
 }
 
 /* ---------- routing ---------- */

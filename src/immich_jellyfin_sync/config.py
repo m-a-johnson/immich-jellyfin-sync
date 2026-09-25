@@ -29,6 +29,7 @@ class Config:
     jellyfin: Service | None
     paths: Paths
     sync_interval_minutes: int
+    jellyfin_library_path: str = "/immich-sync"   # paths.output as Jellyfin sees it
 
 
 class ConfigError(Exception):
@@ -82,6 +83,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
             output=output,
         ),
         sync_interval_minutes=interval,
+        jellyfin_library_path=((raw.get("jellyfin") or {}).get("library_path") or "/immich-sync").rstrip("/"),
     )
 
 

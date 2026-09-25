@@ -5,6 +5,7 @@
   albums             list Immich albums and which are enabled
   enable ALBUM       enable an album by id or exact name
   disable ALBUM      disable an album (its files are removed on the next sync)
+  jellyfin-check     test the Jellyfin connection, library and item lookup (changes nothing)
 """
 import argparse
 import logging
@@ -13,6 +14,7 @@ import sys
 
 from . import __version__, config
 from .immich import ImmichClient, ImmichError
+from .jellyfin import JellyfinClient, JellyfinError
 from .state import State
 from .sync import Syncer
 
@@ -40,6 +42,7 @@ def main(argv=None) -> int:
     sub.add_parser("albums")
     for name in ("enable", "disable"):
         sub.add_parser(name).add_argument("album")
+    sub.add_parser("jellyfin-check")
     args = ap.parse_args(argv)
 
     log.info("immich-jellyfin-sync %s", __version__)
@@ -62,6 +65,8 @@ def main(argv=None) -> int:
             state.set_enabled(a.id, a.name, args.cmd == "enable")
             print(f"{args.cmd}d {a.name!r}; run 'sync' or wait for the next pass")
             return 0
+        if args.cmd == "jellyfin-check":
+            return _jellyfin_check(cfg, state)
         if args.cmd == "sync":
             report = Syncer(client, state, cfg.paths, dry_run=args.dry_run).run()
             log.info("sync done: %s", report)
@@ -76,13 +81,51 @@ def main(argv=None) -> int:
         client.close()
 
 
+def _jellyfin(cfg):
+    if cfg.jellyfin is None:
+        log.info("no jellyfin section in config.yaml: Jellyfin won't be told about changes")
+        return None
+    return JellyfinClient(cfg.jellyfin.url, cfg.jellyfin.api_key, cfg.jellyfin_library_path)
+
+
+def _jellyfin_check(cfg, state) -> int:
+    jf = _jellyfin(cfg)
+    if jf is None:
+        print("FAIL no jellyfin section in config.yaml")
+        return 2
+    try:
+        info = jf.server_info()
+        print(f"OK   connected to {info.get('ServerName')} (Jellyfin {info.get('Version')})")
+        lib_id, name = jf.library_id()
+        print(f"OK   library {name!r} uses {cfg.jellyfin_library_path}")
+        ids = jf.item_ids_by_path(lib_id)
+        print(f"OK   Jellyfin lists {len(ids)} item(s) in it")
+        mine = [rel for rel, f in state.owned_files().items() if f.kind == "video"]
+        found = [rel for rel in mine if jf.path(rel) in ids]
+        folders = {rel.rsplit("/", 1)[0] for rel in mine}
+        found_dirs = [d for d in folders if jf.path(d) in ids]
+        print(f"{'OK  ' if len(found) == len(mine) else 'WARN'} {len(found)} of {len(mine)} synced video(s) found by path")
+        print(f"{'OK  ' if len(found_dirs) == len(folders) else 'WARN'} {len(found_dirs)} of {len(folders)} album folder(s) found by path")
+        missing = sorted(set(mine) - set(found))[:5]
+        for rel in missing:
+            print(f"     not found: {jf.path(rel)}")
+        if missing and ids:
+            print(f"     example path Jellyfin reports: {next(iter(ids))}")
+        return 0 if len(found) == len(mine) else 1
+    except JellyfinError as e:
+        print(f"FAIL {e}")
+        return 1
+    finally:
+        jf.close()
+
+
 def _serve(client, cfg) -> int:
     import uvicorn
 
     from .service import SyncService
     from .web import create_app
 
-    service = SyncService(cfg, client, config.state_path())
+    service = SyncService(cfg, client, config.state_path(), jellyfin=_jellyfin(cfg))
     service.start()
     port = int(os.environ.get("IJS_PORT", "8080"))
     log.info("web UI on :%d", port)
