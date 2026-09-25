@@ -107,7 +107,7 @@ header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; m
 .video h3 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
 .video .meta { color: var(--ink-soft); font-size: 0.85rem; }
 .poster { display: flex; align-items: center; gap: 12px; }
-.poster .thumb { position: relative; width: 58px; height: 58px; background: var(--window); border: 5px solid var(--mount); outline: 1px solid var(--mount-edge); }
+.poster .thumb { position: relative; width: 104px; aspect-ratio: 16/9; background: var(--window); border: 5px solid var(--mount); outline: 1px solid var(--mount-edge); }
 .poster .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .poster .thumb .pencil { top: -12px; left: -12px; width: calc(100% + 24px); height: calc(100% + 24px); }
 .poster .auto { font-size: 0.85rem; color: var(--ink-soft); width: 90px; }
@@ -128,6 +128,14 @@ dialog::backdrop { background: rgba(29,40,51,.45); }
 .frame-pick { position: relative; padding: 6px; background: var(--mount); border: 1px solid var(--mount-edge); cursor: pointer; }
 .frame-pick img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--window); }
 .frame-pick .pencil { top: -11px; left: -10px; width: calc(100% + 20px); height: calc(100% + 22px); }
+.jfpreview { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-top: 1px solid var(--mount-edge); }
+.jfpreview[hidden] { display: none; }
+.jfpreview .frame16 { width: 192px; aspect-ratio: 16/9; background: var(--window); flex: none; overflow: hidden; }
+.jfpreview .frame16 img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity .15s; }
+.jfpreview .frame16 img.loading { opacity: .35; }
+.jfpreview p { margin: 0; font-size: 0.87rem; color: var(--ink-soft); max-width: 42ch; }
+.jfpreview p strong { display: block; color: var(--ink); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .jfpreview .frame16 img { transition: none; } }
 .picker footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 14px 20px 18px; border-top: 1px solid var(--mount-edge); }
 .picker footer .spacer { flex: 1; }
 
@@ -156,6 +164,10 @@ dialog::backdrop { background: rgba(29,40,51,.45); }
       <p id="pickerFor"></p>
     </header>
     <div class="sheet" id="sheet" role="radiogroup" aria-labelledby="pickerTitle"></div>
+    <div class="jfpreview" id="jfPreview" hidden aria-live="polite">
+      <div class="frame16"><img id="jfPreviewImg" alt="The selected photo as Jellyfin will show it"></div>
+      <p><strong>How it will look in Jellyfin</strong>Cropped to fit Jellyfin's wide cards, around any faces Immich found.</p>
+    </div>
     <footer>
       <button class="btn" type="button" id="useGrab">Use screen grab</button>
       <span class="spacer"></span>
@@ -222,6 +234,8 @@ function pencil(animate) {
 
 const thumb = (id, size = "thumbnail") => id ? `api/thumb/${encodeURIComponent(id)}?size=${size}` : null;
 const img = (id, alt, size) => id ? h("img", { src: thumb(id, size), alt, loading: "lazy" }) : null;
+// The photo exactly as the sync writes it for Jellyfin (16:9, cropped around faces).
+const rendered = (id, alt) => id ? h("img", { src: `api/render/${encodeURIComponent(id)}`, alt, loading: "lazy" }) : null;
 
 function fmtDuration(ms) {
   if (!ms) return null;
@@ -348,7 +362,7 @@ async function showAlbum(id) {
     const cell = h("div", { class: "poster" });
     const draw = (animate) => {
       const pic = v.posterId
-        ? h("div", { class: "thumb" }, img(v.posterId, "Chosen poster"), pencil(animate))
+        ? h("div", { class: "thumb" }, rendered(v.posterId, "Chosen poster, as Jellyfin shows it"), pencil(animate))
         : h("span", { class: "auto" }, "Screen grab");
       cell.replaceChildren(pic, h("button", { class: "btn", type: "button", onclick: () => openPicker({
           album: a, title: "Choose a poster", currentId: v.posterId,
@@ -368,7 +382,7 @@ async function showAlbum(id) {
   const folderRow = () => {
     const row = h("div", { class: "folderimg" });
     const draw = (animate) => row.replaceChildren(
-      h("div", { class: "thumb" }, img(a.folderImageId, "Folder image"), a.folderImageChosen ? pencil(animate) : null),
+      h("div", { class: "thumb" }, rendered(a.folderImageId, "Folder image, as Jellyfin shows it"), a.folderImageChosen ? pencil(animate) : null),
       h("div", { class: "label" }, h("strong", {}, "Folder image in Jellyfin"),
         a.folderImageChosen ? "A photo you chose" : a.folderImageId ? "The album cover from Immich" : "None: the album has no cover"),
       h("button", { class: "btn", type: "button", onclick: () => openPicker({
@@ -418,12 +432,21 @@ async function showAlbum(id) {
 /* ---------- photo picker (posters and folder images) ---------- */
 async function openPicker({ album, title, intro, currentId, clearLabel, save }) {
   const dlg = $("#picker"), sheet = $("#sheet"), use = $("#usePhoto"), clear = $("#useGrab");
+  const pv = $("#jfPreview"), pvImg = $("#jfPreviewImg");
+  const showPreview = () => {
+    if (!chosen) { pv.hidden = true; return; }
+    pv.hidden = false;
+    pvImg.classList.add("loading");
+    pvImg.onload = () => pvImg.classList.remove("loading");
+    pvImg.src = `api/render/${encodeURIComponent(chosen)}`;
+  };
   let chosen = currentId;
   $("#pickerTitle").textContent = title;
   $("#pickerFor").textContent = intro;
   clear.textContent = clearLabel;
   sheet.replaceChildren(h("p", { class: "empty" }, "Loading photos…"));
   use.disabled = !chosen;
+  pv.hidden = true;
   dlg.showModal();
 
   const run = async (photoId) => {
@@ -449,6 +472,7 @@ async function openPicker({ album, title, intro, currentId, clearLabel, save }) 
       if (sel) el.append(pencil(true));
     }
     use.disabled = !chosen;
+    showPreview();
   };
   sheet.replaceChildren(...photos.map((p) => h("button", {
       class: "frame-pick", type: "button", role: "radio", "data-id": p.id, "aria-label": `Photo from ${fmtDate(p.date)}`,

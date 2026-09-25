@@ -130,7 +130,7 @@ def _serve(client, cfg) -> int:
     port = int(os.environ.get("IJS_PORT", "8080"))
     log.info("web UI on :%d", port)
     try:
-        uvicorn.run(create_app(client, config.state_path(), service), host="0.0.0.0", port=port,
+        uvicorn.run(create_app(client, config.state_path(), service, crop=cfg.crop_images), host="0.0.0.0", port=port,
                     log_level="warning", proxy_headers=True)
     finally:
         service.stop()

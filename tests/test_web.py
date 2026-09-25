@@ -158,3 +158,30 @@ def test_poster_choice_triggers_sync(ctx):
     c, fake, svc, db = ctx
     c.put(f"/api/albums/{AID}/videos/{VID}/poster", json={"photoId": PID}, headers=H)
     assert svc.triggered == 1
+
+
+def test_health_is_ok_and_reports_last_sync(ctx):
+    c, fake, svc, db = ctx
+    svc.last = {"finished": "2026-09-25T20:00:00+00:00", "ok": False, "error": "Couldn't reach Immich: down"}
+    r = c.get("/health")
+    assert r.status_code == 200                       # another server being down isn't a reason to restart us
+    assert r.json()["last_error"] == "Couldn't reach Immich: down"
+
+
+def test_render_returns_the_16_9_crop(ctx):
+    import io
+    from PIL import Image
+    c, fake, svc, db = ctx
+    buf = io.BytesIO()
+    Image.new("RGB", (1080, 1440), (10, 20, 30)).save(buf, "JPEG")
+    fake.thumbnail = lambda asset_id, size: (buf.getvalue(), "image/jpeg")
+    fake.faces = lambda asset_id: []
+    r = c.get(f"/api/render/{PID}")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert abs(im.width / im.height - 16 / 9) < 0.01
+
+
+def test_render_rejects_bad_ids(ctx):
+    c, *_ = ctx
+    assert c.get("/api/render/..%2F..%2Fetc").status_code in (400, 404)

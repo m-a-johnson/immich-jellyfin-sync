@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
+from . import images
 from .immich import ImmichError
 from .state import State
 
@@ -86,7 +87,7 @@ class CoverBody(BaseModel):
     photoId: str | None = None
 
 
-def create_app(client, state_path, service) -> FastAPI:
+def create_app(client, state_path, service, crop: bool = True) -> FastAPI:
     app = FastAPI(title="immich-jellyfin-sync", docs_url=None, redoc_url=None, openapi_url=None)
     counts = VideoCounts(client)
     service.on_sync = counts.clear
@@ -113,6 +114,15 @@ def create_app(client, state_path, service) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index():
         return files("immich_jellyfin_sync").joinpath("static/index.html").read_text()
+
+    @app.get("/health")
+    def health():
+        """For Docker's HEALTHCHECK: 200 while the web server and sync thread are up.
+        Immich/Jellyfin trouble is reported in the body, not as a failure: restarting
+        this container wouldn't fix another server being down."""
+        last = service.last or {}
+        return {"status": "ok", "syncing": service.running, "last_sync": last.get("finished"),
+                "last_sync_ok": last.get("ok"), "last_error": last.get("error") or last.get("jellyfin_error")}
 
     @app.get("/api/status")
     def status():
@@ -190,6 +200,23 @@ def create_app(client, state_path, service) -> FastAPI:
         service.trigger()
         return {"albumId": a.id, "folderImageId": body.photoId or a.cover_asset_id,
                 "folderImageChosen": body.photoId is not None}
+
+    @app.get("/api/render/{photo_id}")
+    def render(photo_id: str):
+        """The photo exactly as it would be written for Jellyfin (same crop code as the sync)."""
+        _check_id(photo_id)
+        data, ctype = immich(client.thumbnail, photo_id, "preview")
+        faces = []
+        if crop:
+            try:
+                faces = client.faces(photo_id)
+            except ImmichError:
+                faces = []
+        try:
+            jpeg = images.prepare(data, ctype, faces, crop=crop)
+        except (OSError, ValueError) as e:
+            raise HTTPException(502, f"Couldn't read that image: {e}") from e
+        return Response(jpeg, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
     @app.get("/api/thumb/{asset_id}")
     def thumb(asset_id: str, size: str = "thumbnail"):

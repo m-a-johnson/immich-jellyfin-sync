@@ -34,6 +34,11 @@ Open the container on port 8080 (put it behind Traefik + Authentik; it has no lo
 - **Albums**: every Immich album as a slide mount; turn on **In Jellyfin** to sync its videos. Albums in Jellyfin are circled.
 - **Album page**: its videos; **Choose poster** picks one of the album's photos for a video (default: Jellyfin's own screen grab), and **Change folder image** picks the album folder's image (default: the album's Immich cover).
 - **Sync now** runs a pass immediately; turning an album on or off also triggers one.
+- Poster and folder thumbnails, and the picker's preview, show the **actual 16:9 crop** Jellyfin will get.
+
+`GET /health` answers 200 while the app is running (the image has a Docker `HEALTHCHECK` using it);
+Immich or Jellyfin problems are reported in its body rather than failing it, since restarting this
+container wouldn't fix another server.
 
 ## CLI
 
