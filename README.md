@@ -77,6 +77,8 @@ tag filters:
   one video (it stays removed even if Immich keeps listing it; restore it any time).
 - Tags come from Immich's asset details (nested tags use their last part: `Places/Canada/BC` becomes `BC`).
   If tags can't be read, the video's existing NFO is kept as-is rather than rewritten without them.
+- Each NFO has `<uniqueid type="immich">` with the video's Immich asset id (a future Jellyfin plugin
+  could turn it into a link back to Immich).
 - Names and tags are sorted, so Immich returning them in another order never rewrites an NFO.
 
 - **Roles**: set once per person on the **People** page (e.g. "Nonno"); Jellyfin shows "as Nonno"

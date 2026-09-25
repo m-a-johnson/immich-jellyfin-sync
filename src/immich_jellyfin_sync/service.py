@@ -80,7 +80,7 @@ class SyncService:
             log.exception("claiming people in Jellyfin failed")
             return
         if res.claimed or res.faces or res.removed_images:
-            log.info("people: %d cleaned/locked, %d face(s) from Immich, %d online photo(s) removed",
+            log.info("people: %d locked, %d face(s) from Immich, %d online photo(s) removed",
                      res.claimed, res.faces, res.removed_images)
         if res.not_in_jellyfin:
             log.info("people not in Jellyfin yet (next pass): %s", res.not_in_jellyfin)

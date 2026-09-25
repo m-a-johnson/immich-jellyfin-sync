@@ -59,6 +59,9 @@ def nfo_xml(a: Asset, people: list[str] = (), tags: list[str] = (), title: str |
         ET.SubElement(root, "year").text = a.local_date_time[:4]
     if a.description:
         ET.SubElement(root, "plot").text = a.description
+    # Links the item back to Immich. Jellyfin keeps unknown id types as provider ids; showing
+    # them as a clickable link needs a (future) plugin registering "immich" with a URL pattern.
+    ET.SubElement(root, "uniqueid", type="immich").text = a.id
     for t in sorted(set(tags), key=str.casefold):
         ET.SubElement(root, "tag").text = t
     for name in people:

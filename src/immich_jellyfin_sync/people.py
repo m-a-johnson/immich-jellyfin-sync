@@ -66,7 +66,7 @@ def _claim_one(jf, immich, state, name: str, immich_id: str | None, res: ClaimRe
         item["LockData"] = True
         jf.update_item(item)
         res.claimed += 1
-        log.info("person %r: cleared online details and locked", name)
+        log.info("person %r: %s", name, "cleared online details and locked" if had_online else "locked")
 
     if immich_id is None:
         immich_id = immich.find_person(name)

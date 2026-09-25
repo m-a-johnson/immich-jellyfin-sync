@@ -365,3 +365,11 @@ def test_description_read_from_exif_info():
     a = _asset({"id": "v", "type": "VIDEO", "originalPath": "/data/a.mov", "originalFileName": "a.mov",
                 "exifInfo": {"description": "  Lake day  "}})
     assert a.description == "Lake day"
+
+
+
+def test_nfo_links_back_to_the_immich_asset(env):
+    out, state, fake, run = env
+    run()
+    ids = ET.fromstring((out / NFO).read_bytes()).findall("uniqueid")
+    assert [(u.get("type"), u.text) for u in ids] == [("immich", VID)]
