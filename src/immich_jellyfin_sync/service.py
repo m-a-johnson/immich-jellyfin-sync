@@ -23,6 +23,7 @@ class SyncService:
         self._stop = threading.Event()
         self.running = False
         self.last: dict | None = None          # {finished, ok, summary, error, created, removed, failed_albums}
+        self.on_sync = None                    # callback after every pass (e.g. drop cached counts)
 
     def run_once(self) -> None:
         with self._run_lock:
@@ -46,6 +47,11 @@ class SyncService:
                 self.last["finished"] = datetime.now(timezone.utc).isoformat()
                 self.running = False
                 state.close()
+                if self.on_sync:
+                    try:
+                        self.on_sync()
+                    except Exception:  # noqa: BLE001
+                        log.exception("on_sync callback failed")
 
     def trigger(self) -> None:
         """Ask the loop to sync now (returns immediately)."""

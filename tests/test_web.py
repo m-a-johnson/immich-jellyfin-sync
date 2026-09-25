@@ -117,3 +117,25 @@ def test_immich_down_is_a_clear_502(ctx):
     fake.down = True
     r = c.get("/api/albums")
     assert r.status_code == 502 and "Immich" in r.json()["error"]
+
+
+def test_video_counts_use_the_sync_rule_and_are_cached(ctx):
+    c, fake, svc, db = ctx
+    calls = []
+    orig = fake.album_videos
+    fake.album_videos = lambda album_id: calls.append(album_id) or orig(album_id)
+    # the album has one visible video and one hidden one; only the visible one syncs
+    assert c.get("/api/video-counts").json() == {AID: 1}
+    assert c.get("/api/video-counts").json() == {AID: 1}
+    assert calls == [AID]                     # second request served from cache
+    svc.on_sync()                             # a sync clears the cache
+    c.get("/api/video-counts")
+    assert calls == [AID, AID]
+
+
+def test_video_count_failure_is_null_and_not_cached(ctx):
+    c, fake, svc, db = ctx
+    fake.album_videos = lambda album_id: (_ for _ in ()).throw(ImmichError("boom"))
+    assert c.get("/api/video-counts").json() == {AID: None}
+    fake.album_videos = lambda album_id: [mk(VID, "VIDEO")]
+    assert c.get("/api/video-counts").json() == {AID: 1}

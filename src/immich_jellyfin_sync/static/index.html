@@ -268,7 +268,18 @@ async function showAlbums() {
   try { albums = await api("GET", "api/albums"); }
   catch (e) { view.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "Couldn't load albums"), e.message)); return; }
 
-  const on = albums.filter((a) => a.enabled).length;
+  // Counts come from a second, slower request so the albums appear straight away.
+  let counts = {};
+  const videoLabel = (n) => n === undefined ? "Counting videos…" : n === null ? "Couldn't count videos"
+    : n === 0 ? "No videos" : `${n} video${n === 1 ? "" : "s"}`;
+  api("GET", "api/video-counts").then((c) => {
+    counts = c;
+    for (const el of view.querySelectorAll("[data-count]")) el.textContent = videoLabel(counts[el.dataset.count]);
+  }).catch(() => {
+    counts = Object.fromEntries(albums.map((a) => [a.id, null]));
+    for (const el of view.querySelectorAll("[data-count]")) el.textContent = videoLabel(null);
+  });
+
   const render = () => {
     const shown = filter === "on" ? albums.filter((a) => a.enabled) : albums;
     const grid = h("div", { class: "grid" }, shown.map(mountFor));
@@ -288,7 +299,7 @@ async function showAlbums() {
         h("div", { class: "window" }, img(a.coverId, "")),
         h("p", { class: "name" }, a.name || "Untitled album")),
       h("div", { class: "row" },
-        h("span", { class: "meta" }, `${a.assetCount} item${a.assetCount === 1 ? "" : "s"}`),
+        h("span", { class: "meta", "data-count": a.id }, videoLabel(counts[a.id])),
         switchBtn(a.enabled, "In Jellyfin", async (next, btn) => {
           btn.disabled = true;
           try {

@@ -1,7 +1,11 @@
 """Web UI + JSON API. No auth of its own: run it behind Traefik + Authentik."""
 from __future__ import annotations
 
+import logging
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -10,6 +14,8 @@ from pydantic import BaseModel
 
 from .immich import ImmichError
 from .state import State
+
+log = logging.getLogger(__name__)
 
 _UUID = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 
@@ -27,6 +33,47 @@ def _same_origin(x_requested_with: str | None = Header(default=None)) -> None:
         raise HTTPException(403, "missing X-Requested-With header")
 
 
+class VideoCounts:
+    """Per-album count of videos that would sync (same rule as the sync: Asset.syncable).
+
+    Fetching each album's video list is one Immich search per album, so results are
+    cached for `ttl` seconds and dropped whenever a sync runs.
+    """
+
+    def __init__(self, client, ttl: float = 600, workers: int = 4):
+        self.client = client
+        self.ttl = ttl
+        self.workers = workers
+        self._lock = threading.Lock()
+        self._cache: dict[str, tuple[float, int]] = {}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
+
+    def _count(self, album_id: str) -> int | None:
+        try:
+            return sum(1 for v in self.client.album_videos(album_id) if v.syncable)
+        except ImmichError as e:
+            log.warning("couldn't count videos in album %s: %s", album_id, e)
+            return None
+
+    def get(self, album_ids: list[str]) -> dict[str, int | None]:
+        now = time.monotonic()
+        with self._lock:
+            fresh = {i: c for i, (t, c) in self._cache.items() if now - t < self.ttl and i in album_ids}
+        missing = [i for i in album_ids if i not in fresh]
+        if missing:
+            with ThreadPoolExecutor(max_workers=self.workers) as pool:
+                counted = dict(zip(missing, pool.map(self._count, missing)))
+            with self._lock:
+                for i, c in counted.items():
+                    if c is not None:            # don't cache failures
+                        self._cache[i] = (now, c)
+            fresh.update(counted)
+        return fresh
+
+
 class EnabledBody(BaseModel):
     enabled: bool
 
@@ -37,6 +84,8 @@ class PosterBody(BaseModel):
 
 def create_app(client, state_path, service) -> FastAPI:
     app = FastAPI(title="immich-jellyfin-sync", docs_url=None, redoc_url=None, openapi_url=None)
+    counts = VideoCounts(client)
+    service.on_sync = counts.clear
 
     def db():
         s = State(state_path)
@@ -77,6 +126,11 @@ def create_app(client, state_path, service) -> FastAPI:
                  "coverId": a.cover_asset_id, "enabled": a.id in enabled} for a in immich(client.albums)]
         rows.sort(key=lambda r: (not r["enabled"], r["name"].casefold()))
         return rows
+
+    @app.get("/api/video-counts")
+    def video_counts():
+        """{album id: number of videos that sync, or null if Immich couldn't be read}"""
+        return counts.get([a.id for a in immich(client.albums)])
 
     @app.put("/api/albums/{album_id}", dependencies=[Depends(_same_origin)])
     def set_enabled(album_id: str, body: EnabledBody, state: State = Depends(db)):
