@@ -107,6 +107,20 @@ header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; m
 .video h3 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
 .video .meta { color: var(--ink-soft); font-size: 0.85rem; }
 .poster { display: flex; align-items: center; gap: 12px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 3px 2px 10px; border: 1px solid var(--mount-edge);
+  border-radius: 999px; font-size: 0.82rem; background: #fff; line-height: 1.6; }
+.chip.mine { border-style: dashed; }
+.chip button { border: 0; background: none; cursor: pointer; width: 20px; height: 20px; border-radius: 50%;
+  color: var(--ink-soft); font-size: 0.95rem; line-height: 1; display: grid; place-items: center; }
+.chip button:hover { background: var(--table); color: var(--ink); }
+.chip-add { border: 1px dashed var(--mount-edge); background: none; border-radius: 999px; padding: 2px 10px;
+  font-size: 0.82rem; color: var(--ink-soft); cursor: pointer; line-height: 1.6; }
+.chip-add:hover { color: var(--ink); border-color: var(--ink-soft); }
+.chip input { border: 0; outline: none; background: none; width: 14ch; padding: 0; font-size: 0.82rem; }
+.subtle { font-size: 0.8rem; color: var(--ink-soft); margin-top: 6px; }
+.subtle button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink-soft); text-decoration: underline; font-size: inherit; }
+.subtle button:hover { color: var(--ink); }
 .poster .thumb { position: relative; width: 104px; aspect-ratio: 16/9; background: var(--window); border: 5px solid var(--mount); outline: 1px solid var(--mount-edge); }
 .poster .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .poster .thumb .pencil { top: -12px; left: -12px; width: calc(100% + 24px); height: calc(100% + 24px); }
@@ -178,6 +192,7 @@ dialog::backdrop { background: rgba(29,40,51,.45); }
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>
+<datalist id="knownPeople"></datalist>
 
 <script>
 "use strict";
@@ -398,12 +413,70 @@ async function showAlbum(id) {
     return row;
   };
 
+  $("#knownPeople").replaceChildren(...(a.knownPeople || []).map((n) => h("option", { value: n })));
+
+  // People in the video: Immich's names plus your own; removing an Immich name hides it for this video.
+  const peopleCell = (v) => {
+    const box = h("div");
+    const change = async (action, name) => {
+      try {
+        const r = await api("POST", `api/albums/${a.id}/videos/${v.id}/people`, { action, name });
+        v.people = r.people; v.hiddenPeople = r.hiddenPeople;
+        draw();
+        setTimeout(refreshStatus, 2000);
+      } catch (e) { toast(e.message); }
+    };
+    const adder = () => {
+      const btn = h("button", { class: "chip-add", type: "button" }, "+ Add person");
+      btn.onclick = () => {
+        const input = h("input", { type: "text", list: "knownPeople", "aria-label": `Add a person to ${v.title}`,
+          maxlength: "80", placeholder: "Name" });
+        const chip = h("span", { class: "chip mine" }, input);
+        let finished = false;                     // Enter redraws the list, which fires blur: act once
+        const done = (save) => {
+          if (finished) return;
+          finished = true;
+          const name = input.value.trim();
+          if (save && name) change("add", name); else chip.replaceWith(adder());
+        };
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); done(true); }
+          if (e.key === "Escape") done(false);
+        });
+        input.addEventListener("blur", () => done(Boolean(input.value.trim())));
+        btn.replaceWith(chip);
+        input.focus();
+      };
+      return btn;
+    };
+    const draw = () => {
+      const chips = h("div", { class: "chips", "aria-label": "People in this video" },
+        v.people.map((p) => h("span", { class: "chip" + (p.source === "added" ? " mine" : ""),
+            title: p.source === "added" ? "Added here" : "From Immich" },
+          p.name,
+          h("button", { type: "button", "aria-label": `Remove ${p.name} from this video`,
+            onclick: () => change("remove", p.name) }, "×"))),
+        adder());
+      const hidden = v.hiddenPeople.length
+        ? h("div", { class: "subtle" }, "Hidden from Immich: ",
+            v.hiddenPeople.flatMap((n, i) => [i ? ", " : "", n, " (",
+              h("button", { type: "button", onclick: () => change("restore", n) }, "restore"), ")"]))
+        : null;
+      const tags = h("div", { class: "subtle" },
+        v.tags === null ? "Couldn't read tags from Immich" : v.tags.length ? `Tags: ${v.tags.join(", ")}` : "No tags in Immich");
+      box.replaceChildren(chips, hidden, tags);
+    };
+    draw();
+    return box;
+  };
+
   const list = a.videos.length
     ? h("ul", { class: "videos" }, a.videos.map((v) => h("li", { class: "video" },
         h("div", { class: "frame" }, img(v.id, "")),
         h("div", {},
           h("h3", {}, v.title),
-          h("div", { class: "meta" }, [fmtDate(v.date), fmtDuration(v.durationMs)].filter(Boolean).join(", "))),
+          h("div", { class: "meta" }, [fmtDate(v.date), fmtDuration(v.durationMs)].filter(Boolean).join(", ")),
+          peopleCell(v)),
         posterCell(v))))
     : h("div", { class: "empty" }, h("strong", {}, "No videos in this album"),
         "Add videos to the album in Immich. Photos in the album can be used as posters.");
@@ -424,7 +497,8 @@ async function showAlbum(id) {
       })),
     h("p", { class: "note" },
       `${a.videos.length} video${a.videos.length === 1 ? "" : "s"}. `,
-      "Videos without a chosen poster use a frame Jellyfin picks from the video."),
+      "Videos without a chosen poster use a frame Jellyfin picks from the video. ",
+      "People start from Immich; dashed names were added here."),
     folderRow(),
     list);
 }

@@ -14,9 +14,11 @@ from pydantic import BaseModel
 
 from . import images
 from .immich import ImmichError
-from .state import State
+from .state import State, merge_people
 
 log = logging.getLogger(__name__)
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 _UUID = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 
@@ -85,6 +87,27 @@ class PosterBody(BaseModel):
 
 class CoverBody(BaseModel):
     photoId: str | None = None
+
+
+class PersonBody(BaseModel):
+    action: str        # add | remove | restore
+    name: str
+
+
+def _clean_person(name: str) -> str:
+    name = " ".join(_CONTROL.sub(" ", name).split())
+    if not 1 <= len(name) <= 80:
+        raise HTTPException(400, "Names must be 1 to 80 characters")
+    return name
+
+
+def people_view(immich_names, added: set[str], hidden: set[str]) -> dict:
+    immich = set(immich_names)
+    return {
+        "people": [{"name": n, "source": "immich" if n in immich else "added"}
+                   for n in merge_people(immich_names, added, hidden)],
+        "hiddenPeople": sorted((hidden & immich), key=str.casefold),
+    }
 
 
 def create_app(client, state_path, service, crop: bool = True) -> FastAPI:
@@ -161,13 +184,44 @@ def create_app(client, state_path, service, crop: bool = True) -> FastAPI:
         videos.sort(key=lambda v: v.local_date_time)
         posters = state.posters(a.id)
         override = state.cover(a.id)
+
+        def tags_of(video_id):
+            try:
+                return client.tags(video_id)
+            except ImmichError:
+                return None
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            tags = dict(zip([v.id for v in videos], pool.map(tags_of, [v.id for v in videos])))
+        people = {v.id: people_view(v.people, *state.people_changes(v.id)) for v in videos}
+        known = sorted({p["name"] for pv in people.values() for p in pv["people"]}
+                       | {n for pv in people.values() for n in pv["hiddenPeople"]}, key=str.casefold)
         return {
             "id": a.id, "name": a.name, "coverId": a.cover_asset_id,
             "folderImageId": override or a.cover_asset_id, "folderImageChosen": override is not None,
             "enabled": a.id in state.enabled_album_ids(),
+            "knownPeople": known,
             "videos": [{"id": v.id, "title": v.title, "date": v.local_date_time[:10],
-                        "durationMs": v.duration_ms, "posterId": posters.get(v.id)} for v in videos],
+                        "durationMs": v.duration_ms, "posterId": posters.get(v.id),
+                        "tags": tags[v.id], **people[v.id]} for v in videos],
         }
+
+    @app.post("/api/albums/{album_id}/videos/{video_id}/people", dependencies=[Depends(_same_origin)])
+    def change_person(album_id: str, video_id: str, body: PersonBody, state: State = Depends(db)):
+        _check_id(album_id), _check_id(video_id)
+        video = next((v for v in immich(client.album_videos, album_id) if v.id == video_id and v.syncable), None)
+        if video is None:
+            raise HTTPException(400, "That video isn't in this album")
+        name = _clean_person(body.name)
+        if body.action == "add":
+            state.add_person(video_id, name)
+        elif body.action == "remove":
+            state.remove_person(video_id, name, from_immich=name in video.people)
+        elif body.action == "restore":
+            state.restore_person(video_id, name)
+        else:
+            raise HTTPException(400, "action must be add, remove or restore")
+        service.trigger()
+        return {"videoId": video_id, **people_view(video.people, *state.people_changes(video_id))}
 
     @app.get("/api/albums/{album_id}/photos")
     def photos(album_id: str):

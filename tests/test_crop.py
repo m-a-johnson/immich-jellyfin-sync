@@ -99,6 +99,9 @@ class Fake:
     def album_photos(self, album_id):
         return [Asset(PHOTO, "IMAGE", "/data/r.jpg", "r.jpg", "2018-07-28T10:00:00Z", "timeline", False, False)]
 
+    def tags(self, asset_id):
+        return []
+
     def faces(self, asset_id):
         self.face_calls += 1
         if self.faces_error:

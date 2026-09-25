@@ -11,10 +11,10 @@ PID = "33333333-cccc"
 H = {"X-Requested-With": "fetch"}
 
 
-def mk(id, type, name="x.mov", visibility="timeline"):
+def mk(id, type, name="x.mov", visibility="timeline", people=()):
     return Asset(id=id, type=type, original_path=f"/data/{name}", original_file_name=name,
                  local_date_time="2018-07-28T19:51:01.114Z", visibility=visibility,
-                 is_trashed=False, is_offline=False, duration_ms=369847)
+                 is_trashed=False, is_offline=False, duration_ms=369847, people=tuple(people))
 
 
 class Fake:
@@ -27,7 +27,13 @@ class Fake:
         return [Album(AID, "Wedding", PID, 3)]
 
     def album_videos(self, album_id):
-        return [mk(VID, "VIDEO", "Tanis & Mark Wedding.mp4"), mk("hidden-1", "VIDEO", visibility="hidden")]
+        return [mk(VID, "VIDEO", "Tanis & Mark Wedding.mp4", people=("Tanis", "Mark")),
+                mk("hidden-1", "VIDEO", visibility="hidden")]
+
+    def tags(self, asset_id):
+        if getattr(self, "tags_down", False):
+            raise ImmichError("tags down")
+        return ["Wedding"]
 
     def album_photos(self, album_id):
         return [mk(PID, "IMAGE", "cake.jpg")]
@@ -185,3 +191,42 @@ def test_render_returns_the_16_9_crop(ctx):
 def test_render_rejects_bad_ids(ctx):
     c, *_ = ctx
     assert c.get("/api/render/..%2F..%2Fetc").status_code in (400, 404)
+
+
+
+def test_album_shows_people_and_tags(ctx):
+    c, *_ = ctx
+    v = c.get(f"/api/albums/{AID}").json()["videos"][0]
+    assert v["people"] == [{"name": "Mark", "source": "immich"}, {"name": "Tanis", "source": "immich"}]
+    assert v["hiddenPeople"] == [] and v["tags"] == ["Wedding"]
+
+
+def test_add_remove_restore_people(ctx):
+    c, fake, svc, db = ctx
+    url = f"/api/albums/{AID}/videos/{VID}/people"
+    r = c.post(url, json={"action": "add", "name": "  Grandma   Jo "}, headers=H).json()
+    assert {"name": "Grandma Jo", "source": "added"} in r["people"]          # whitespace tidied
+    r = c.post(url, json={"action": "remove", "name": "Mark"}, headers=H).json()
+    assert [p["name"] for p in r["people"]] == ["Grandma Jo", "Tanis"] and r["hiddenPeople"] == ["Mark"]
+    r = c.post(url, json={"action": "restore", "name": "Mark"}, headers=H).json()
+    assert r["hiddenPeople"] == [] and "Mark" in [p["name"] for p in r["people"]]
+    r = c.post(url, json={"action": "remove", "name": "Grandma Jo"}, headers=H).json()
+    assert r["hiddenPeople"] == []                                         # your own name: just gone
+    assert svc.triggered == 4
+
+
+def test_people_validation(ctx):
+    c, *_ = ctx
+    url = f"/api/albums/{AID}/videos/{VID}/people"
+    assert c.post(url, json={"action": "add", "name": "   "}, headers=H).status_code == 400
+    assert c.post(url, json={"action": "add", "name": "x" * 81}, headers=H).status_code == 400
+    assert c.post(url, json={"action": "rename", "name": "A"}, headers=H).status_code == 400
+    assert c.post(url, json={"action": "add", "name": "A"}).status_code == 403              # CSRF header
+    assert c.post(f"/api/albums/{AID}/videos/99999999-gone/people",
+                  json={"action": "add", "name": "A"}, headers=H).status_code == 400
+
+
+def test_tags_unavailable_is_null_not_an_error(ctx):
+    c, fake, *_ = ctx
+    fake.tags_down = True
+    assert c.get(f"/api/albums/{AID}").json()["videos"][0]["tags"] is None

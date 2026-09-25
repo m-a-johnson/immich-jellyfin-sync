@@ -40,6 +40,7 @@ class Asset:
     is_offline: bool
     duration_ms: int | None = None
     description: str = ""
+    people: tuple[str, ...] = ()     # named, visible people Immich found in it
 
     @property
     def visible(self) -> bool:
@@ -68,6 +69,8 @@ def _asset(d: dict) -> Asset:
         is_offline=bool(d.get("isOffline")),
         duration_ms=d.get("duration") if isinstance(d.get("duration"), (int, float)) else None,
         description=((d.get("exifInfo") or {}).get("description") or "").strip(),
+        people=tuple(p["name"].strip() for p in d.get("people") or []
+                     if isinstance(p, dict) and (p.get("name") or "").strip() and not p.get("isHidden")),
     )
 
 
@@ -76,7 +79,7 @@ class ImmichClient:
     MAX_PAGES = 400
 
     def __init__(self, url: str, api_key: str, timeout: float = 30.0, transport: httpx.BaseTransport | None = None):
-        self._with_exif = True      # ask search for exifInfo (descriptions); dropped if Immich rejects it
+        self._with_extras = True    # ask search for exifInfo + people; dropped if Immich rejects them
         self._http = httpx.Client(
             base_url=url,
             headers={"x-api-key": api_key, "Accept": "application/json"},
@@ -123,14 +126,15 @@ class ImmichClient:
         page = 1
         for _ in range(self.MAX_PAGES):
             body = {"albumIds": [album_id], "type": asset_type, "page": page, "size": self.PAGE_SIZE}
-            if self._with_exif and asset_type == "VIDEO":
+            if self._with_extras and asset_type == "VIDEO":
                 body["withExif"] = True
+                body["withPeople"] = True
             try:
                 data = self._request("POST", "/api/search/metadata", json=body)
             except ImmichError as e:
                 if "withExif" in body and "HTTP 400" in str(e):
-                    log.warning("Immich rejected withExif; continuing without video descriptions (%s)", e)
-                    self._with_exif = False
+                    log.warning("Immich rejected withExif/withPeople; continuing without descriptions or people (%s)", e)
+                    self._with_extras = False
                     continue
                 raise
             assets = (data or {}).get("assets")
@@ -152,6 +156,17 @@ class ImmichClient:
 
     def album_photos(self, album_id: str) -> list[Asset]:
         return self.album_assets(album_id, "IMAGE")
+
+    def tags(self, asset_id: str) -> list[str]:
+        """Tag names on one asset (search results don't include tags). Nested tags give
+        their last part: 'Places/Canada/BC' -> 'BC'."""
+        data = self._request("GET", f"/api/assets/{asset_id}")
+        out = []
+        for t in (data or {}).get("tags") or []:
+            name = (t.get("name") or (t.get("value") or "").rsplit("/", 1)[-1]).strip()
+            if name:
+                out.append(name)
+        return out
 
     def faces(self, asset_id: str) -> list:
         """Detected faces as fractions of the image they were measured on. Needs face.read."""

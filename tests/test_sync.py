@@ -31,6 +31,9 @@ class FakeImmich:
             raise ImmichError("down")
         return list(self.albums_list)
 
+    def tags(self, asset_id):
+        return []
+
     def album_videos(self, album_id):
         if album_id in self.fail_albums:
             raise ImmichError("boom")

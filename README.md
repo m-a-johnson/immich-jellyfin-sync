@@ -69,6 +69,18 @@ Confirmed on Jellyfin 12.1 (Home Videos and Photos library):
 
 | Title, date, description | `<video file name without extension>.nfo` |
 
+The NFO also carries **people** (`<actor>`) and **tags** (`<tag>`), so Jellyfin shows a People row and
+tag filters:
+
+- People start from the named, visible people Immich has on the video (detected or added by hand in
+  Immich). On the album page you can add names that exist only here, or remove an Immich name for
+  one video (it stays removed even if Immich keeps listing it; restore it any time).
+- Tags come from Immich's asset details (nested tags use their last part: `Places/Canada/BC` becomes `BC`).
+  If tags can't be read, the video's existing NFO is kept as-is rather than rewritten without them.
+- Names and tags are sorted, so Immich returning them in another order never rewrites an NFO.
+
+Names you add live in this app's state DB (`/config/state.db`), not in Immich.
+
 The NFO title is the video's original file name (e.g. `Tanis & Mark Wedding`), the date is when it
 was recorded, and the description comes from Immich's info panel. Edit a description in Immich and
 the NFO is rewritten on the next sync; edit an NFO by hand and it's left alone.

@@ -51,6 +51,9 @@ class Fake:
     def album_photos(self, album_id):
         return list(self.photos)
 
+    def tags(self, asset_id):
+        return []
+
     def faces(self, asset_id):
         return []
 

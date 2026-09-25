@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS covers (    -- folder image chosen in the web UI (els
     album_id       TEXT PRIMARY KEY,
     photo_asset_id TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS people_added (    -- names you added to a video
+    video_asset_id TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    PRIMARY KEY (video_asset_id, name)
+);
+CREATE TABLE IF NOT EXISTS people_hidden (   -- Immich names you removed from a video
+    video_asset_id TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    PRIMARY KEY (video_asset_id, name)
+);
 CREATE TABLE IF NOT EXISTS dirs (
     path     TEXT PRIMARY KEY,
     album_id TEXT NOT NULL
@@ -127,3 +137,32 @@ class State:
             self.db.execute("INSERT OR REPLACE INTO covers (album_id, photo_asset_id) VALUES (?, ?)",
                             (album_id, photo_id))
         self.db.commit()
+
+    # people overrides (per video)
+    def people_changes(self, video_id: str) -> tuple[set[str], set[str]]:
+        """(added, hidden) for one video"""
+        added = {r[0] for r in self.db.execute("SELECT name FROM people_added WHERE video_asset_id = ?", (video_id,))}
+        hidden = {r[0] for r in self.db.execute("SELECT name FROM people_hidden WHERE video_asset_id = ?", (video_id,))}
+        return added, hidden
+
+    def add_person(self, video_id: str, name: str) -> None:
+        self.db.execute("DELETE FROM people_hidden WHERE video_asset_id = ? AND name = ?", (video_id, name))
+        self.db.execute("INSERT OR IGNORE INTO people_added (video_asset_id, name) VALUES (?, ?)", (video_id, name))
+        self.db.commit()
+
+    def remove_person(self, video_id: str, name: str, from_immich: bool) -> None:
+        self.db.execute("DELETE FROM people_added WHERE video_asset_id = ? AND name = ?", (video_id, name))
+        if from_immich:
+            self.db.execute("INSERT OR IGNORE INTO people_hidden (video_asset_id, name) VALUES (?, ?)", (video_id, name))
+        self.db.commit()
+
+    def restore_person(self, video_id: str, name: str) -> None:
+        self.db.execute("DELETE FROM people_hidden WHERE video_asset_id = ? AND name = ?", (video_id, name))
+        self.db.commit()
+
+
+def merge_people(immich_names, added: set[str], hidden: set[str]) -> list[str]:
+    """Immich's names minus the hidden ones, plus your own; sorted so the NFO doesn't
+    change (and get rewritten) just because Immich returned people in another order."""
+    names = {n for n in immich_names if n not in hidden} | set(added)
+    return sorted(names, key=lambda n: (n.casefold(), n))

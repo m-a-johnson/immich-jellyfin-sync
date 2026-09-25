@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from . import images
 from .config import Paths
 from .immich import Album, Asset, ImmichError
-from .state import OwnedFile, State
+from .state import OwnedFile, State, merge_people
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def sidecar_rel(video_rel: str, ext: str) -> str:
     return os.path.splitext(video_rel)[0] + ext
 
 
-def nfo_xml(a: Asset) -> bytes:
+def nfo_xml(a: Asset, people: list[str] = (), tags: list[str] = ()) -> bytes:
     """Jellyfin reads '<video name>.nfo' in Home Videos libraries (confirmed on 12.1)."""
     root = ET.Element("movie")
     ET.SubElement(root, "title").text = a.title
@@ -57,6 +57,12 @@ def nfo_xml(a: Asset) -> bytes:
         ET.SubElement(root, "year").text = a.local_date_time[:4]
     if a.description:
         ET.SubElement(root, "plot").text = a.description
+    for t in sorted(set(tags), key=str.casefold):
+        ET.SubElement(root, "tag").text = t
+    for name in people:
+        actor = ET.SubElement(root, "actor")
+        ET.SubElement(actor, "name").text = name
+        ET.SubElement(actor, "type").text = "Actor"
     ET.indent(root)
     body = ET.tostring(root, encoding="unicode")          # escapes & < > for us
     return ('<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n' + body + "\n").encode("utf-8")
@@ -160,6 +166,7 @@ class Syncer:
         self.dry_run = dry_run
         self.crop = crop
         self._faces_ok = True
+        self.keep: set[str] = set()     # owned files to leave exactly as they are this pass
         self.root = os.path.normpath(str(paths.output))
         if self.root == os.sep:
             raise ValueError("refusing to use / as the output directory")
@@ -199,7 +206,7 @@ class Syncer:
 
         owned = self.state.owned_files()
         for rel, row in sorted(owned.items()):
-            if row.album_id in frozen:
+            if row.album_id in frozen or rel in self.keep:
                 continue
             d = desired.get(rel)
             if d is not None and d.album_id == row.album_id and d.kind == row.kind:
@@ -208,6 +215,8 @@ class Syncer:
             owned.pop(rel)
 
         for rel, d in sorted(desired.items(), key=lambda kv: (kv[1].kind != "video", kv[0])):
+            if rel in self.keep:
+                continue
             if isinstance(d, DesiredImage):
                 self._ensure_image(rel, d, owned.get(rel), report)
             elif isinstance(d, DesiredNfo):
@@ -234,7 +243,16 @@ class Syncer:
                 continue
             rel = f"{folder}/{video_filename(a)}"
             desired[rel] = Desired(album.id, a.id, target)
-            desired[sidecar_rel(rel, ".nfo")] = DesiredNfo(album.id, a.id, nfo_xml(a), rel)
+            nfo = sidecar_rel(rel, ".nfo")
+            try:
+                tags = self.client.tags(a.id)
+            except ImmichError as e:
+                # don't rewrite the NFO without its tags because of a passing error
+                log.warning("%s: couldn't read tags (%s); keeping its current NFO", rel, e)
+                self.keep.add(nfo)
+                tags = []
+            added, hidden = self.state.people_changes(a.id)
+            desired[nfo] = DesiredNfo(album.id, a.id, nfo_xml(a, merge_people(a.people, added, hidden), tags), rel)
             video_rels[a.id] = rel
         if not video_rels:
             return                          # nothing in Jellyfin for this album: no folder image either
