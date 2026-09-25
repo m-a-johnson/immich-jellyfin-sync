@@ -41,6 +41,7 @@ class Asset:
     duration_ms: int | None = None
     description: str = ""
     people: tuple[str, ...] = ()     # named, visible people Immich found in it
+    person_ids: tuple[tuple[str, str], ...] = ()   # (name, Immich person id) for those people
 
     @property
     def visible(self) -> bool:
@@ -69,9 +70,14 @@ def _asset(d: dict) -> Asset:
         is_offline=bool(d.get("isOffline")),
         duration_ms=d.get("duration") if isinstance(d.get("duration"), (int, float)) else None,
         description=((d.get("exifInfo") or {}).get("description") or "").strip(),
-        people=tuple(p["name"].strip() for p in d.get("people") or []
-                     if isinstance(p, dict) and (p.get("name") or "").strip() and not p.get("isHidden")),
+        people=tuple(p["name"].strip() for p in _named_people(d)),
+        person_ids=tuple((p["name"].strip(), p["id"]) for p in _named_people(d) if p.get("id")),
     )
+
+
+def _named_people(d: dict) -> list[dict]:
+    return [p for p in d.get("people") or []
+            if isinstance(p, dict) and (p.get("name") or "").strip() and not p.get("isHidden")]
 
 
 class ImmichClient:
@@ -167,6 +173,17 @@ class ImmichClient:
             if name:
                 out.append(name)
         return out
+
+    def find_person(self, name: str) -> str | None:
+        """Immich person id with exactly this name (needs person.read), or None."""
+        for p in self._request("GET", "/api/search/person", params={"name": name}) or []:
+            if (p.get("name") or "").strip() == name and not p.get("isHidden"):
+                return p.get("id")
+        return None
+
+    def person_face(self, person_id: str) -> bytes:
+        """The face photo Immich shows on its People page (JPEG)."""
+        return self._raw("GET", f"/api/people/{person_id}/thumbnail").content
 
     def faces(self, asset_id: str) -> list:
         """Detected faces as fractions of the image they were measured on. Needs face.read."""

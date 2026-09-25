@@ -81,6 +81,12 @@ tag filters:
 
 - **Roles**: set once per person on the **People** page (e.g. "Nonno"); Jellyfin shows "as Nonno"
   under their name on every video instead of "Actor".
+- **Faces and locking**: Jellyfin identifies people only by name, server-wide, and looks them up
+  online, so a first name can pick up a stranger's biography and photo. After each sync, every person
+  in your NFOs is cleaned (external ids, biography, birth details cleared), **locked** so Jellyfin
+  won't look them up again, and given their face from Immich (`person.read`). Names added only here
+  get the face of the Immich person with exactly that name, if there is one. An image you set in
+  Jellyfin yourself is never replaced.
 - **Titles**: each video's title is Immich's file name unless you set one on its album page.
 
 Names, roles and titles you add live in this app's state DB (`/config/state.db`), not in Immich.
@@ -130,7 +136,7 @@ Live Photo motion clips).
 
 ## Requirements
 
-- Immich API key with **album.read**, **asset.read**, **asset.view** and **face.read** only (asset.view: thumbnails in the web UI; face.read: face-aware cropping)
+- Immich API key with **album.read**, **asset.read**, **asset.view**, **face.read** and **person.read** only (asset.view: web UI thumbnails; face.read: face-aware cropping; person.read: faces for Jellyfin's people)
 - Jellyfin API key (optional; Dashboard > API Keys) so changes show up without waiting for a library scan
 - Jellyfin must mount Immich's storage **read-only** at `paths.jellyfin_prefix`, and this container's output folder as its library
 - Put the web UI behind authentication (e.g. Traefik + Authentik); it holds API keys

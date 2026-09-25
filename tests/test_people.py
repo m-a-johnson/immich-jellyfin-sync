@@ -150,3 +150,14 @@ def test_roles_written_once_per_person_across_videos(env):
     assert actors == {"Evie": None, "Mark": None, "Tanis": "Mom"}
     assert r.nfos_written == 1
     assert run().nfos_written == 0                                  # stable afterwards
+
+
+def test_sync_reports_people_with_immich_ids(env):
+    out, state, fake, run = env
+    fake.video = Asset(VID, "VIDEO", "/data/library/mark/2025/07/Fairmont 2025.mp4", "Fairmont 2025.mp4",
+                       "2025-07-31T10:00:00Z", "timeline", False, False,
+                       people=("Tanis", "Evie"), person_ids=(("Tanis", "imm-t"), ("Evie", "imm-e")))
+    state.add_person(VID, "Grandma Jo")
+    state.remove_person(VID, "Evie", from_immich=True)
+    r = run()
+    assert r.people == {"Tanis": "imm-t", "Grandma Jo": None}      # hidden people aren't claimed

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from .config import Config
 from .immich import ImmichError
 from .jellyfin import JellyfinError, notify
+from .people import claim_people
 from .state import State
 from .sync import Syncer
 
@@ -35,6 +36,7 @@ class SyncService:
                 r = Syncer(self.client, state, self.cfg.paths, crop=self.cfg.crop_images).run()
                 log.info("sync done: %s", r)
                 jf_error = self._tell_jellyfin(r)
+                self._claim_people(state, r)
                 self.last = {"ok": not r.failed_albums and not jf_error, "summary": str(r), "error": None,
                              "created": r.created, "removed": r.removed, "linked": r.linked,
                              "failed_albums": r.failed_albums, "jellyfin_error": jf_error}
@@ -68,6 +70,22 @@ class SyncService:
         except JellyfinError as e:
             log.warning("couldn't tell Jellyfin about changes: %s", e)
             return f"Couldn't reach Jellyfin: {e}"
+
+    def _claim_people(self, state, r) -> None:
+        if self.jellyfin is None or not r.people:
+            return
+        try:
+            res = claim_people(self.jellyfin, self.client, state, r.people)
+        except Exception:  # noqa: BLE001 - never let this break syncing
+            log.exception("claiming people in Jellyfin failed")
+            return
+        if res.claimed or res.faces or res.removed_images:
+            log.info("people: %d cleaned/locked, %d face(s) from Immich, %d online photo(s) removed",
+                     res.claimed, res.faces, res.removed_images)
+        if res.not_in_jellyfin:
+            log.info("people not in Jellyfin yet (next pass): %s", res.not_in_jellyfin)
+        if res.errors:
+            log.warning("people with errors: %s", res.errors)
 
     def trigger(self) -> None:
         """Ask the loop to sync now (returns immediately)."""

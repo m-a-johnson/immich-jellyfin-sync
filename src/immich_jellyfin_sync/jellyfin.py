@@ -5,8 +5,10 @@ X-Emby-Token header and ?api_key= query parameter were removed.
 """
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
 import httpx
 
@@ -85,6 +87,29 @@ class JellyfinClient:
             "replaceAllMetadata": str(metadata).lower(),
             "replaceAllImages": str(images).lower(),
         })
+
+    # ---- people (confirmed on 12.1: GET /Persons/{name}, POST /Items/{id} keeps LockData,
+    #      POST /Items/{id}/Images/Primary with a base64 body)
+    def person(self, name: str) -> dict | None:
+        try:
+            r = self._http.request("GET", f"/Persons/{quote(name, safe='')}")
+        except httpx.HTTPError as e:
+            raise JellyfinError(f"GET /Persons/{name}: {e}") from e
+        if r.status_code == 404:
+            return None                        # Jellyfin hasn't read an NFO with this name yet
+        if r.status_code >= 400:
+            raise JellyfinError(f"GET /Persons/{name}: HTTP {r.status_code} {r.text[:200]}")
+        return r.json()
+
+    def update_item(self, item: dict) -> None:
+        self._req("POST", f"/Items/{item['Id']}", json=item)
+
+    def upload_primary(self, item_id: str, jpeg: bytes) -> None:
+        self._req("POST", f"/Items/{item_id}/Images/Primary", content=base64.b64encode(jpeg),
+                  headers={"Content-Type": "image/jpeg"})
+
+    def delete_primary(self, item_id: str) -> None:
+        self._req("DELETE", f"/Items/{item_id}/Images/Primary")
 
     def media_updated(self, updates: list[tuple[str, str]]) -> None:
         """updates: (jellyfin path, 'Created' | 'Deleted' | 'Modified')"""

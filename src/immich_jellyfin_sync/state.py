@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS person_roles (    -- shown under the name in Jellyfin
     name TEXT PRIMARY KEY,
     role TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS claimed_people (  -- Jellyfin people this tool cleaned, locked and gave a face
+    name        TEXT PRIMARY KEY,
+    jellyfin_id TEXT NOT NULL,
+    face_sha    TEXT,                       -- sha256 of the Immich face we uploaded
+    image_tag   TEXT                        -- Jellyfin's tag for that upload (a different tag = not ours)
+);
 CREATE TABLE IF NOT EXISTS dirs (
     path     TEXT PRIMARY KEY,
     album_id TEXT NOT NULL
@@ -189,6 +195,16 @@ class State:
             self.db.execute("DELETE FROM person_roles WHERE name = ?", (name,))
         else:
             self.db.execute("INSERT OR REPLACE INTO person_roles (name, role) VALUES (?, ?)", (name, role))
+        self.db.commit()
+
+    # claimed people
+    def claimed(self, name: str) -> dict | None:
+        r = self.db.execute("SELECT jellyfin_id, face_sha, image_tag FROM claimed_people WHERE name = ?", (name,)).fetchone()
+        return {"jellyfin_id": r[0], "face_sha": r[1], "image_tag": r[2]} if r else None
+
+    def set_claimed(self, name: str, jellyfin_id: str, face_sha: str | None, image_tag: str | None) -> None:
+        self.db.execute("INSERT OR REPLACE INTO claimed_people (name, jellyfin_id, face_sha, image_tag) VALUES (?, ?, ?, ?)",
+                        (name, jellyfin_id, face_sha, image_tag))
         self.db.commit()
 
 

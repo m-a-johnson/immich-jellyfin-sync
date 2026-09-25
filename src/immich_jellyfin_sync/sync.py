@@ -146,6 +146,7 @@ class Report:
     removed_links: list[str] = field(default_factory=list)
     images_changed: set[str] = field(default_factory=set)
     metadata_changed: set[str] = field(default_factory=set)
+    people: dict[str, str | None] = field(default_factory=dict)   # name -> Immich person id (None: look up by name)
 
     @property
     def linked(self) -> int:
@@ -257,8 +258,12 @@ class Syncer:
                 self.keep.add(nfo)
                 tags = []
             added, hidden = self.state.people_changes(a.id)
-            desired[nfo] = DesiredNfo(album.id, a.id, nfo_xml(a, merge_people(a.people, added, hidden), tags,
-                                                              self.state.title(a.id), roles), rel)
+            names = merge_people(a.people, added, hidden)
+            ids = dict(a.person_ids)
+            for n in names:
+                if ids.get(n) or n not in report.people:
+                    report.people[n] = ids.get(n) or report.people.get(n)
+            desired[nfo] = DesiredNfo(album.id, a.id, nfo_xml(a, names, tags, self.state.title(a.id), roles), rel)
             video_rels[a.id] = rel
         if not video_rels:
             return                          # nothing in Jellyfin for this album: no folder image either
