@@ -6,11 +6,18 @@ Pick Immich albums in a small web UI. The container mirrors each album's **video
 
 ## Status
 
-Early development. Planned in three steps:
+Working and in daily use with **Immich 3.2** and **Jellyfin 12.1**: album sync with safe cleanup,
+posters and folder images cropped around faces, NFO metadata (titles, dates, descriptions, tags,
+people with roles), people's faces from Immich, and a web UI for all of it.
 
-1. **Sync engine**: config, state DB, symlinks, album covers, owned-file cleanup
-2. **Web UI**: album toggles, per-video poster picker (photos from the same album)
-3. **Posters + Jellyfin refresh**: poster JPGs written from Immich previews, targeted Jellyfin image refresh
+## Roadmap
+
+- [ ] **Shared albums**: test albums shared with you by another Immich user (v3 added
+  `isShared`/`isOwned` to albums), including their videos, people and posters.
+- [ ] **Link back to Immich from Jellyfin**: a small Jellyfin plugin that registers the `immich`
+  provider id (already written to every NFO as `<uniqueid type="immich">` and stored by Jellyfin)
+  with a URL pattern like `https://<immich>/photos/{id}`, so the web UI shows an Immich link.
+- [ ] **Preview of a sync**: show what the next sync would change before it runs (design to be decided).
 
 ## How it works
 
