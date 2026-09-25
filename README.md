@@ -152,6 +152,10 @@ Live Photo motion clips).
 
 See `config.example.yaml` and `docker-compose.example.yml`.
 
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the code layout, safety rules, verified Immich/Jellyfin API behaviour, tests and releases.
+
 ## License
 
 MIT
