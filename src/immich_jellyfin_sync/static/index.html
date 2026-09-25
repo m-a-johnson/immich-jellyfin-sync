@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home videos for Jellyfin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='3' width='26' height='26' rx='3' fill='%23FBFBF9' stroke='%231D2833' stroke-width='2'/><rect x='9' y='9' width='14' height='14' fill='%231D2833'/><ellipse cx='16' cy='16' rx='14' ry='13' fill='none' stroke='%23C0392B' stroke-width='2.5'/></svg>">
+<style>
+:root {
+  --table: #E6ECF0;
+  --table-glow: #F6F9FB;
+  --mount: #FBFBF9;
+  --mount-edge: #CDD5DB;
+  --window: #26303A;
+  --ink: #1D2833;
+  --ink-soft: #56636F;
+  --pencil: #C0392B;
+  --focus: #1F5F93;
+  --radius-mount: 4px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(ellipse 90% 70% at 50% 35%, var(--table-glow), var(--table) 70%) fixed;
+}
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 64px; }
+
+/* header */
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-bottom: 28px; }
+header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; margin: 0; flex: 1 1 auto; }
+.status { color: var(--ink-soft); font-size: 0.87rem; }
+.status.bad { color: var(--pencil); }
+
+.btn {
+  border: 1px solid var(--mount-edge); background: var(--mount); border-radius: 6px;
+  padding: 7px 14px; cursor: pointer; font-weight: 550;
+}
+.btn:hover { border-color: var(--ink-soft); }
+.btn.primary { background: var(--ink); color: var(--mount); border-color: var(--ink); }
+.btn.primary:hover { background: #2E3D4B; }
+.btn:disabled { opacity: .5; cursor: default; }
+.link { background: none; border: 0; padding: 4px 0; cursor: pointer; color: var(--ink-soft); font-weight: 550; }
+.link:hover { color: var(--ink); text-decoration: underline; }
+
+/* filter */
+.filter { display: inline-flex; gap: 4px; margin-bottom: 20px; }
+.filter button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; cursor: pointer; color: var(--ink-soft); font-weight: 550; }
+.filter button[aria-pressed="true"] { background: var(--mount); color: var(--ink); box-shadow: inset 0 0 0 1px var(--mount-edge); }
+
+/* slide mounts */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 34px 26px; }
+.mount {
+  position: relative; background: var(--mount); border: 1px solid var(--mount-edge);
+  border-radius: var(--radius-mount); padding: 14px 14px 12px;
+  box-shadow: 0 1px 0 rgba(29,40,51,.07), 0 6px 14px -10px rgba(29,40,51,.35);
+}
+.mount .open { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+.window { aspect-ratio: 1; background: var(--window); overflow: hidden; }
+.window img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mount .name { margin: 10px 0 0; font-weight: 600; font-size: 0.95rem; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mount .meta { color: var(--ink-soft); font-size: 0.82rem; }
+.mount .row { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 8px; }
+
+/* grease pencil circle */
+.pencil { position: absolute; inset: -16px -14px; pointer-events: none; overflow: visible; }
+.pencil path { fill: none; stroke: var(--pencil); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+.pencil.draw path { stroke-dasharray: 1400; stroke-dashoffset: 1400; animation: draw .55s ease-out forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .pencil.draw path { animation: none; stroke-dashoffset: 0; } }
+
+/* switch */
+.switch { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 2px 0; cursor: pointer; font-size: 0.85rem; color: var(--ink-soft); }
+.switch .track { width: 34px; height: 20px; border-radius: 999px; background: var(--mount-edge); position: relative; transition: background .15s; flex: none; }
+.switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch[aria-checked="true"] { color: var(--ink); }
+.switch[aria-checked="true"] .track { background: var(--pencil); }
+.switch[aria-checked="true"] .track::after { transform: translateX(14px); }
+@media (prefers-reduced-motion: reduce) { .switch .track, .switch .track::after { transition: none; } }
+
+/* album view */
+.albumhead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 8px 0 6px; }
+.albumhead h2 { font-size: 1.35rem; margin: 0; font-weight: 650; flex: 1 1 auto; }
+.note { color: var(--ink-soft); font-size: 0.87rem; margin: 0 0 24px; max-width: 70ch; }
+.videos { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.video {
+  display: grid; grid-template-columns: 176px 1fr auto; gap: 16px; align-items: center;
+  background: var(--mount); border: 1px solid var(--mount-edge); border-radius: var(--radius-mount); padding: 12px;
+}
+.video .frame { aspect-ratio: 16/9; background: var(--window); overflow: hidden; }
+.video .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.video h3 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.video .meta { color: var(--ink-soft); font-size: 0.85rem; }
+.poster { display: flex; align-items: center; gap: 12px; }
+.poster .thumb { position: relative; width: 58px; height: 58px; background: var(--window); border: 5px solid var(--mount); outline: 1px solid var(--mount-edge); }
+.poster .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.poster .thumb .pencil { inset: -12px -12px; }
+.poster .auto { font-size: 0.85rem; color: var(--ink-soft); width: 90px; }
+@media (max-width: 640px) {
+  .video { grid-template-columns: 1fr; }
+  .poster { justify-content: space-between; }
+}
+
+/* picker */
+dialog { border: 0; padding: 0; border-radius: 8px; width: min(920px, calc(100vw - 24px)); max-height: calc(100vh - 32px);
+  background: var(--table); color: var(--ink); box-shadow: 0 30px 60px -20px rgba(29,40,51,.5); }
+dialog::backdrop { background: rgba(29,40,51,.45); }
+.picker { display: flex; flex-direction: column; max-height: calc(100vh - 32px); }
+.picker header { padding: 18px 20px 6px; }
+.picker h2 { margin: 0; font-size: 1.1rem; }
+.picker p { margin: 4px 0 0; color: var(--ink-soft); font-size: 0.87rem; }
+.sheet { overflow: auto; padding: 18px 22px; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 18px; }
+.frame-pick { position: relative; padding: 6px; background: var(--mount); border: 1px solid var(--mount-edge); cursor: pointer; }
+.frame-pick img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--window); }
+.frame-pick .pencil { inset: -11px -10px; }
+.picker footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 14px 20px 18px; border-top: 1px solid var(--mount-edge); }
+.picker footer .spacer { flex: 1; }
+
+.empty { color: var(--ink-soft); padding: 32px 0; max-width: 60ch; }
+.empty strong { color: var(--ink); display: block; margin-bottom: 4px; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--mount);
+  padding: 10px 16px; border-radius: 6px; font-size: 0.9rem; max-width: calc(100vw - 32px); }
+.toast[hidden] { display: none; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Home videos for Jellyfin</h1>
+    <span class="status" id="status" aria-live="polite"></span>
+    <button class="btn" id="syncNow" type="button">Sync now</button>
+  </header>
+  <main id="view"></main>
+</div>
+
+<dialog id="picker" aria-labelledby="pickerTitle">
+  <form class="picker" method="dialog">
+    <header>
+      <h2 id="pickerTitle">Choose a poster</h2>
+      <p id="pickerFor"></p>
+    </header>
+    <div class="sheet" id="sheet" role="radiogroup" aria-labelledby="pickerTitle"></div>
+    <footer>
+      <button class="btn" type="button" id="useGrab">Use screen grab</button>
+      <span class="spacer"></span>
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" type="button" id="usePhoto" disabled>Use this photo</button>
+    </footer>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null) el.append(kid instanceof Node ? kid : document.createTextNode(kid));
+  return el;
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { "X-Requested-With": "fetch" } };
+  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 4000);
+}
+
+// A hand-drawn loop, slightly different each time, like a grease pencil mark.
+function pencil(animate) {
+  const j = () => (Math.random() - 0.5) * 6;
+  const d = `M ${50 + j()} ${4 + j()}
+    C ${86 + j()} ${3 + j()}, ${98 + j()} ${30 + j()}, ${97 + j()} ${52 + j()}
+    C ${96 + j()} ${80 + j()}, ${74 + j()} ${97 + j()}, ${49 + j()} ${96 + j()}
+    C ${22 + j()} ${95 + j()}, ${3 + j()} ${78 + j()}, ${4 + j()} ${50 + j()}
+    C ${5 + j()} ${22 + j()}, ${24 + j()} ${6 + j()}, ${56 + j()} ${7 + j()}`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "pencil" + (animate ? " draw" : ""));
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("d", d);
+  p.setAttribute("vector-effect", "non-scaling-stroke");
+  p.setAttribute("pathLength", "1400");
+  svg.append(p);
+  return svg;
+}
+
+const thumb = (id, size = "thumbnail") => id ? `api/thumb/${encodeURIComponent(id)}?size=${size}` : null;
+const img = (id, alt, size) => id ? h("img", { src: thumb(id, size), alt, loading: "lazy" }) : null;
+
+function fmtDuration(ms) {
+  if (!ms) return null;
+  const s = Math.round(ms / 1000), m = Math.floor(s / 60), hr = Math.floor(m / 60);
+  return hr ? `${hr}:${String(m % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}` : `${m}:${String(s % 60).padStart(2, "0")}`;
+}
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T12:00:00");
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
+function switchBtn(checked, label, onToggle) {
+  const b = h("button", { class: "switch", type: "button", role: "switch", "aria-checked": String(checked) },
+    h("span", { class: "track", "aria-hidden": "true" }), label);
+  b.addEventListener("click", () => onToggle(b.getAttribute("aria-checked") !== "true", b));
+  return b;
+}
+
+/* ---------- status ---------- */
+async function refreshStatus() {
+  const el = $("#status");
+  try {
+    const s = await api("GET", "api/status");
+    el.classList.remove("bad");
+    if (s.running) { el.textContent = "Syncing with Immich…"; return; }
+    if (!s.last) { el.textContent = "Waiting for the first sync"; return; }
+    const at = new Date(s.last.finished).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    if (s.last.error) { el.classList.add("bad"); el.textContent = `${s.last.error} (at ${at})`; return; }
+    if (s.last.failed_albums.length) {
+      el.classList.add("bad");
+      el.textContent = `Last sync ${at}: couldn't read ${s.last.failed_albums.join(", ")}`;
+      return;
+    }
+    const n = s.last.linked;
+    el.textContent = `Last synced ${at}, ${n} video${n === 1 ? "" : "s"} in Jellyfin`;
+  } catch { el.classList.add("bad"); el.textContent = "Can't reach this app's server"; }
+}
+$("#syncNow").addEventListener("click", async () => {
+  try { await api("POST", "api/sync"); $("#status").textContent = "Syncing with Immich…"; setTimeout(refreshStatus, 1500); }
+  catch (e) { toast(e.message); }
+});
+
+/* ---------- albums ---------- */
+let filter = "all";
+async function showAlbums() {
+  const view = $("#view");
+  view.replaceChildren(h("p", { class: "empty" }, "Loading albums…"));
+  let albums;
+  try { albums = await api("GET", "api/albums"); }
+  catch (e) { view.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "Couldn't load albums"), e.message)); return; }
+
+  const on = albums.filter((a) => a.enabled).length;
+  const render = () => {
+    const shown = filter === "on" ? albums.filter((a) => a.enabled) : albums;
+    const grid = h("div", { class: "grid" }, shown.map(mountFor));
+    const body = shown.length ? grid : h("div", { class: "empty" },
+      h("strong", {}, filter === "on" ? "No albums are in Jellyfin yet" : "No albums in Immich"),
+      filter === "on" ? "Turn on “In Jellyfin” for an album to add its videos." : "Create an album in Immich and it will show up here.");
+    view.replaceChildren(filterBar(), body);
+  };
+  const filterBar = () => h("div", { class: "filter", role: "group", "aria-label": "Show" },
+    h("button", { type: "button", "aria-pressed": String(filter === "all"), onclick: () => { filter = "all"; render(); } }, "All albums"),
+    h("button", { type: "button", "aria-pressed": String(filter === "on"), onclick: () => { filter = "on"; render(); } },
+      `In Jellyfin (${albums.filter((a) => a.enabled).length})`));
+
+  const mountFor = (a) => {
+    const m = h("article", { class: "mount" },
+      h("button", { class: "open", type: "button", onclick: () => (location.hash = `#/album/${a.id}`) },
+        h("div", { class: "window" }, img(a.coverId, "")),
+        h("p", { class: "name" }, a.name || "Untitled album")),
+      h("div", { class: "row" },
+        h("span", { class: "meta" }, `${a.assetCount} item${a.assetCount === 1 ? "" : "s"}`),
+        switchBtn(a.enabled, "In Jellyfin", async (next, btn) => {
+          btn.disabled = true;
+          try {
+            await api("PUT", `api/albums/${a.id}`, { enabled: next });
+            a.enabled = next;
+            btn.setAttribute("aria-checked", String(next));
+            m.querySelector(".pencil")?.remove();
+            if (next) m.prepend(pencil(true));
+            toast(next ? `Adding “${a.name}” to Jellyfin` : `Removing “${a.name}” from Jellyfin`);
+            setTimeout(refreshStatus, 1500);
+            if (filter === "on" && !next) render();
+            else view.querySelector(".filter button:last-child").textContent = `In Jellyfin (${albums.filter((x) => x.enabled).length})`;
+          } catch (e) { toast(e.message); }
+          finally { btn.disabled = false; }
+        })));
+    if (a.enabled) m.prepend(pencil(false));
+    return m;
+  };
+  render();
+}
+
+/* ---------- one album ---------- */
+async function showAlbum(id) {
+  const view = $("#view");
+  view.replaceChildren(h("p", { class: "empty" }, "Loading album…"));
+  let a;
+  try { a = await api("GET", `api/albums/${encodeURIComponent(id)}`); }
+  catch (e) {
+    view.replaceChildren(h("button", { class: "link", type: "button", onclick: () => (location.hash = "#/") }, "All albums"),
+      h("div", { class: "empty" }, h("strong", {}, "Couldn't load this album"), e.message));
+    return;
+  }
+
+  const posterCell = (v) => {
+    const cell = h("div", { class: "poster" });
+    const draw = (animate) => {
+      const pic = v.posterId
+        ? h("div", { class: "thumb" }, img(v.posterId, "Chosen poster"), pencil(animate))
+        : h("span", { class: "auto" }, "Screen grab");
+      cell.replaceChildren(pic, h("button", { class: "btn", type: "button", onclick: () => openPicker(a, v, draw) },
+        v.posterId ? "Change poster" : "Choose poster"));
+    };
+    draw(false);
+    return cell;
+  };
+
+  const list = a.videos.length
+    ? h("ul", { class: "videos" }, a.videos.map((v) => h("li", { class: "video" },
+        h("div", { class: "frame" }, img(v.id, "")),
+        h("div", {},
+          h("h3", {}, v.title),
+          h("div", { class: "meta" }, [fmtDate(v.date), fmtDuration(v.durationMs)].filter(Boolean).join(", "))),
+        posterCell(v))))
+    : h("div", { class: "empty" }, h("strong", {}, "No videos in this album"),
+        "Add videos to the album in Immich. Photos in the album can be used as posters.");
+
+  view.replaceChildren(
+    h("button", { class: "link", type: "button", onclick: () => (location.hash = "#/") }, "All albums"),
+    h("div", { class: "albumhead" },
+      h("h2", {}, a.name || "Untitled album"),
+      switchBtn(a.enabled, "In Jellyfin", async (next, btn) => {
+        btn.disabled = true;
+        try {
+          await api("PUT", `api/albums/${a.id}`, { enabled: next });
+          btn.setAttribute("aria-checked", String(next));
+          toast(next ? `Adding “${a.name}” to Jellyfin` : `Removing “${a.name}” from Jellyfin`);
+          setTimeout(refreshStatus, 1500);
+        } catch (e) { toast(e.message); }
+        finally { btn.disabled = false; }
+      })),
+    h("p", { class: "note" },
+      `${a.videos.length} video${a.videos.length === 1 ? "" : "s"}. `,
+      "Posters you choose are saved now; Jellyfin keeps showing screen grabs until poster support is added in the next update."),
+    list);
+}
+
+/* ---------- poster picker ---------- */
+async function openPicker(album, video, redraw) {
+  const dlg = $("#picker"), sheet = $("#sheet"), use = $("#usePhoto");
+  let chosen = video.posterId;
+  $("#pickerFor").textContent = `For “${video.title}”. Pick a photo from “${album.name}”.`;
+  sheet.replaceChildren(h("p", { class: "empty" }, "Loading photos…"));
+  use.disabled = !chosen;
+  dlg.showModal();
+
+  let photos;
+  try { photos = await api("GET", `api/albums/${encodeURIComponent(album.id)}/photos`); }
+  catch (e) { sheet.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "Couldn't load photos"), e.message)); return; }
+  if (!photos.length) {
+    sheet.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "This album has no photos"),
+      "Add a photo to the album in Immich, then choose it here."));
+    return;
+  }
+  const mark = () => {
+    for (const el of sheet.children) {
+      const sel = el.dataset.id === chosen;
+      el.setAttribute("aria-checked", String(sel));
+      el.querySelector(".pencil")?.remove();
+      if (sel) el.append(pencil(true));
+    }
+    use.disabled = !chosen;
+  };
+  sheet.replaceChildren(...photos.map((p) => h("button", {
+      class: "frame-pick", type: "button", role: "radio", "data-id": p.id, "aria-label": `Photo from ${fmtDate(p.date)}`,
+      onclick: () => { chosen = p.id; mark(); } }, img(p.id, ""))));
+  mark();
+
+  const save = async (photoId) => {
+    try {
+      await api("PUT", `api/albums/${album.id}/videos/${video.id}/poster`, { photoId });
+      video.posterId = photoId;
+      redraw(Boolean(photoId));
+      dlg.close();
+      toast(photoId ? "Poster saved" : "Using the screen grab");
+    } catch (e) { toast(e.message); }
+  };
+  use.onclick = () => save(chosen);
+  $("#useGrab").onclick = () => save(null);
+}
+
+/* ---------- routing ---------- */
+function route() {
+  const m = location.hash.match(/^#\/album\/([\w-]+)$/);
+  if (m) showAlbum(m[1]); else showAlbums();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+route();
+refreshStatus();
+setInterval(() => { if (!document.hidden) refreshStatus(); }, 10000);
+</script>
+</body>
+</html>

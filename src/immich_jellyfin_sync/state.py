@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS files (      -- paths relative to paths.output
     kind     TEXT NOT NULL,              -- 'video' (step 1); 'poster'/'cover' later
     target   TEXT
 );
+CREATE TABLE IF NOT EXISTS posters (   -- chosen in the web UI; written to disk in step 3
+    album_id       TEXT NOT NULL,
+    video_asset_id TEXT NOT NULL,
+    photo_asset_id TEXT NOT NULL,
+    PRIMARY KEY (album_id, video_asset_id)
+);
 CREATE TABLE IF NOT EXISTS dirs (
     path     TEXT PRIMARY KEY,
     album_id TEXT NOT NULL
@@ -36,8 +42,9 @@ class OwnedFile:
 
 class State:
     def __init__(self, path: Path | str):
-        self.db = sqlite3.connect(str(path))
+        self.db = sqlite3.connect(str(path), timeout=10)
         self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA busy_timeout=10000")
         self.db.executescript(SCHEMA)
         self.db.commit()
 
@@ -88,3 +95,18 @@ class State:
 
     def forget_dir(self, path: str) -> None:
         self.db.execute("DELETE FROM dirs WHERE path = ?", (path,))
+
+    # posters
+    def posters(self, album_id: str) -> dict[str, str]:
+        """video asset id -> chosen photo asset id"""
+        return dict(self.db.execute(
+            "SELECT video_asset_id, photo_asset_id FROM posters WHERE album_id = ?", (album_id,)))
+
+    def set_poster(self, album_id: str, video_id: str, photo_id: str | None) -> None:
+        if photo_id is None:
+            self.db.execute("DELETE FROM posters WHERE album_id = ? AND video_asset_id = ?", (album_id, video_id))
+        else:
+            self.db.execute(
+                "INSERT OR REPLACE INTO posters (album_id, video_asset_id, photo_asset_id) VALUES (?, ?, ?)",
+                (album_id, video_id, photo_id))
+        self.db.commit()

@@ -15,7 +15,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.immich-jellyfin-sync.rule=Host(`immich-jellyfin-sync.main.johnsoritti.com`)
       - traefik.http.routers.immich-jellyfin-sync.entrypoints=websecure
-      - traefik.http.routers.immich-jellyfin-sync.middlewares=<your-authentik-chain>@file
+      - traefik.http.routers.immich-jellyfin-sync.middlewares=<your-authentik-chain>@file   # required: the UI has no login
       - traefik.http.services.immich-jellyfin-sync.loadbalancer.server.port=8080
 
 networks:

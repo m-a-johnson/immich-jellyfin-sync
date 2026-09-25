@@ -27,9 +27,17 @@ Immich album "Camping 2019"
 
 The container records every file it creates (symlink, poster, `folder.jpg`) and the Immich asset it came from. Cleanup only ever deletes files in that record. Files it didn't create are never touched, even inside its own output folder, and a misconfigured output path can't wipe unrelated media.
 
-## Usage (step 1: no web UI yet)
+## Web UI
 
-Album selection is done from the CLI until the web UI lands:
+Open the container on port 8080 (put it behind Traefik + Authentik; it has no login of its own).
+
+- **Albums**: every Immich album as a slide mount; turn on **In Jellyfin** to sync its videos. Albums in Jellyfin are circled.
+- **Album page**: its videos, and **Choose poster** to pick one of the album's photos for a video. Poster choices are stored now and written for Jellyfin in step 3.
+- **Sync now** runs a pass immediately; turning an album on or off also triggers one.
+
+## CLI
+
+Everything the UI does for albums is also available from the command line:
 
 ```bash
 docker exec immich-jellyfin-sync python -m immich_jellyfin_sync albums          # list; [x] = enabled
@@ -54,7 +62,7 @@ Live Photo motion clips).
 
 ## Requirements
 
-- Immich API key with **album read** and **asset read** only
+- Immich API key with **album.read**, **asset.read** and **asset.view** only (asset.view is for thumbnails in the web UI)
 - Jellyfin API key (step 3, for poster refresh)
 - Jellyfin must mount Immich's storage **read-only** at `paths.jellyfin_prefix`, and this container's output folder as its library
 - Put the web UI behind authentication (e.g. Traefik + Authentik); it holds API keys

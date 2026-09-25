@@ -1,6 +1,6 @@
 """Entry point.
 
-  (no args)          run the sync loop (container default)
+  (no args)          web UI on :8080 plus the background sync loop (container default)
   sync [--dry-run]   one sync pass
   albums             list Immich albums and which are enabled
   enable ALBUM       enable an album by id or exact name
@@ -8,9 +8,8 @@
 """
 import argparse
 import logging
-import signal
+import os
 import sys
-import threading
 
 from . import __version__, config
 from .immich import ImmichClient, ImmichError
@@ -67,7 +66,8 @@ def main(argv=None) -> int:
             report = Syncer(client, state, cfg.paths, dry_run=args.dry_run).run()
             log.info("sync done: %s", report)
             return 1 if report.failed_albums else 0
-        return _loop(client, state, cfg)
+        state.close()
+        return _serve(client, cfg)
     except ImmichError as e:
         log.error("Immich error: %s", e)
         return 1
@@ -76,21 +76,21 @@ def main(argv=None) -> int:
         client.close()
 
 
-def _loop(client, state, cfg) -> int:
-    stop = threading.Event()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, lambda *_: stop.set())
-    interval = cfg.sync_interval_minutes * 60
-    log.info("sync loop every %d min; output=%s", cfg.sync_interval_minutes, cfg.paths.output)
-    while not stop.is_set():
-        try:
-            log.info("sync done: %s", Syncer(client, state, cfg.paths).run())
-        except ImmichError as e:
-            log.error("sync skipped, Immich unavailable: %s", e)
-        except Exception:
-            log.exception("sync failed")
-        stop.wait(interval)
-    log.info("stopping")
+def _serve(client, cfg) -> int:
+    import uvicorn
+
+    from .service import SyncService
+    from .web import create_app
+
+    service = SyncService(cfg, client, config.state_path())
+    service.start()
+    port = int(os.environ.get("IJS_PORT", "8080"))
+    log.info("web UI on :%d", port)
+    try:
+        uvicorn.run(create_app(client, config.state_path(), service), host="0.0.0.0", port=port,
+                    log_level="warning", proxy_headers=True)
+    finally:
+        service.stop()
     return 0
 
 

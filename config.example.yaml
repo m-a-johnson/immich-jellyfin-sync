@@ -1,7 +1,7 @@
 # Settings only. Album selections and poster choices live in the state DB (/config/state.db).
 immich:
   url: http://immich_server:2283
-  api_key_file: /config/immich_key      # album read + asset read
+  api_key_file: /config/immich_key      # album.read + asset.read + asset.view
 jellyfin:
   url: http://jellyfin:8096
   api_key_file: /config/jellyfin_key    # used for poster refresh (step 3)
