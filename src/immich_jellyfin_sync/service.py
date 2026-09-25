@@ -32,7 +32,7 @@ class SyncService:
             self.running = True
             state = State(self.state_path)
             try:
-                r = Syncer(self.client, state, self.cfg.paths).run()
+                r = Syncer(self.client, state, self.cfg.paths, crop=self.cfg.crop_images).run()
                 log.info("sync done: %s", r)
                 jf_error = self._tell_jellyfin(r)
                 self.last = {"ok": not r.failed_albums and not jf_error, "summary": str(r), "error": None,

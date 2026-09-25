@@ -30,6 +30,7 @@ class Config:
     paths: Paths
     sync_interval_minutes: int
     jellyfin_library_path: str = "/immich-sync"   # paths.output as Jellyfin sees it
+    crop_images: bool = True                        # crop posters/folder images to 16:9 around faces
 
 
 class ConfigError(Exception):
@@ -84,6 +85,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         ),
         sync_interval_minutes=interval,
         jellyfin_library_path=((raw.get("jellyfin") or {}).get("library_path") or "/immich-sync").rstrip("/"),
+        crop_images=bool((raw.get("images") or {}).get("crop", True)),
     )
 
 

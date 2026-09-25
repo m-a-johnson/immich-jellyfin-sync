@@ -51,6 +51,9 @@ class Fake:
     def album_photos(self, album_id):
         return list(self.photos)
 
+    def faces(self, asset_id):
+        return []
+
     def thumbnail(self, asset_id, size):
         assert size == "preview"
         if self.fail_thumbs:
@@ -71,7 +74,8 @@ def env(tmp_path):
     state.set_enabled("A1", FOLDER, True)
     fake = Fake()
     paths = Paths("/data", "/immich", out)
-    yield out, state, fake, (lambda **kw: Syncer(fake, state, paths, **kw).run())
+    # byte-for-byte assertions below: run without cropping (JPEG passed through untouched)
+    yield out, state, fake, (lambda **kw: Syncer(fake, state, paths, **{"crop": False, **kw}).run())
     state.close()
 
 

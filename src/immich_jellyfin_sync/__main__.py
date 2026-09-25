@@ -68,7 +68,7 @@ def main(argv=None) -> int:
         if args.cmd == "jellyfin-check":
             return _jellyfin_check(cfg, state)
         if args.cmd == "sync":
-            report = Syncer(client, state, cfg.paths, dry_run=args.dry_run).run()
+            report = Syncer(client, state, cfg.paths, dry_run=args.dry_run, crop=cfg.crop_images).run()
             log.info("sync done: %s", report)
             return 1 if report.failed_albums else 0
         state.close()

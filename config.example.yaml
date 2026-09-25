@@ -11,3 +11,5 @@ paths:
   jellyfin_prefix: /immich    # where Jellyfin mounts Immich's storage (read-only)
   output: /output             # this container's mount of the Jellyfin library folder
 sync_interval_minutes: 30
+images:
+  crop: true                            # crop posters/folder images to 16:9 around faces (needs face.read)

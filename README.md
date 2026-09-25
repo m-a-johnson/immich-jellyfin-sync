@@ -68,6 +68,20 @@ The NFO title is the video's original file name (e.g. `Tanis & Mark Wedding`), t
 was recorded, and the description comes from Immich's info panel. Edit a description in Immich and
 the NFO is rewritten on the next sync; edit an NFO by hand and it's left alone.
 
+### Cropping
+
+Jellyfin shows Home Videos folders and videos as landscape cards, so posters and folder images are
+cropped to 16:9 (photos already within 5% are left alone):
+
+1. **Faces first**: the crop is placed around the faces Immich detected (`GET /api/faces`, needs
+   `face.read`), with headroom above; if a group is too tall to fit, the tops of heads win.
+2. **Otherwise detail**: the strip with the most edge detail (subjects are busier than backgrounds).
+3. **Otherwise** slightly above centre.
+
+If the key lacks `face.read`, cropping continues without faces (one warning per sync). Turn it off
+with `images: {crop: false}`. The crop method is stored with each image, so improving it later
+re-renders existing images automatically.
+
 Images are Immich's preview size, converted to JPEG if Immich serves WebP, and written atomically.
 The sha256 of each image is recorded; if you replace one with your own file, it is never
 overwritten or deleted. If a chosen photo leaves the album, the choice is cleared and the default
@@ -95,7 +109,7 @@ Live Photo motion clips).
 
 ## Requirements
 
-- Immich API key with **album.read**, **asset.read** and **asset.view** only (asset.view is for thumbnails in the web UI)
+- Immich API key with **album.read**, **asset.read**, **asset.view** and **face.read** only (asset.view: thumbnails in the web UI; face.read: face-aware cropping)
 - Jellyfin API key (optional; Dashboard > API Keys) so changes show up without waiting for a library scan
 - Jellyfin must mount Immich's storage **read-only** at `paths.jellyfin_prefix`, and this container's output folder as its library
 - Put the web UI behind authentication (e.g. Traefik + Authentik); it holds API keys

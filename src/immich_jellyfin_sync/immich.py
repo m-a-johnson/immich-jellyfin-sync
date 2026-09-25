@@ -153,6 +153,20 @@ class ImmichClient:
     def album_photos(self, album_id: str) -> list[Asset]:
         return self.album_assets(album_id, "IMAGE")
 
+    def faces(self, asset_id: str) -> list:
+        """Detected faces as fractions of the image they were measured on. Needs face.read."""
+        from .images import Face
+        out = []
+        for f in self._request("GET", "/api/faces", params={"id": asset_id}) or []:
+            try:
+                w, h = float(f["imageWidth"]), float(f["imageHeight"])
+                if w > 0 and h > 0:
+                    out.append(Face(f["boundingBoxX1"] / w, f["boundingBoxY1"] / h,
+                                    f["boundingBoxX2"] / w, f["boundingBoxY2"] / h))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
     def thumbnail(self, asset_id: str, size: str = "thumbnail") -> tuple[bytes, str]:
         """Image bytes and content type. Needs the asset.view permission."""
         if size not in ("thumbnail", "preview"):

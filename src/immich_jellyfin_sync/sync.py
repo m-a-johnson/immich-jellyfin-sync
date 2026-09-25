@@ -19,6 +19,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
+from . import images
 from .config import Paths
 from .immich import Album, Asset, ImmichError
 from .state import OwnedFile, State
@@ -80,16 +81,6 @@ def album_folders(albums: list[Album], owned_dirs: dict[str, str]) -> dict[str, 
     return folders
 
 
-def to_jpeg(data: bytes, content_type: str) -> bytes:
-    if content_type.split(";")[0].strip().lower() in ("image/jpeg", "image/jpg"):
-        return data
-    from PIL import Image   # only needed if Immich serves previews as WebP
-    with Image.open(io.BytesIO(data)) as im:
-        out = io.BytesIO()
-        im.convert("RGB").save(out, "JPEG", quality=90)
-        return out.getvalue()
-
-
 def sha256(path: str) -> str:
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
@@ -109,6 +100,12 @@ class DesiredImage:
     photo_id: str
     kind: str          # 'poster' | 'cover'
     item_rel: str      # the Jellyfin item this image belongs to (video link or album folder)
+    version: str = images.VERSION
+
+    @property
+    def key(self) -> str:
+        """Stored as the file's asset_id: a new photo *or* a new crop method re-renders it."""
+        return f"{self.photo_id}|{self.version}"
 
 
 @dataclass(frozen=True)
@@ -156,11 +153,13 @@ class Report:
 
 
 class Syncer:
-    def __init__(self, client, state: State, paths: Paths, dry_run: bool = False):
+    def __init__(self, client, state: State, paths: Paths, dry_run: bool = False, crop: bool = True):
         self.client = client
         self.state = state
         self.paths = paths
         self.dry_run = dry_run
+        self.crop = crop
+        self._faces_ok = True
         self.root = os.path.normpath(str(paths.output))
         if self.root == os.sep:
             raise ValueError("refusing to use / as the output directory")
@@ -260,10 +259,25 @@ class Syncer:
 
         for video_id, photo_id in posters.items():
             vrel = video_rels[video_id]
-            desired[sidecar_rel(vrel, ".jpg")] = DesiredImage(album.id, photo_id, "poster", vrel)
+            desired[sidecar_rel(vrel, ".jpg")] = DesiredImage(album.id, photo_id, "poster", vrel, self._version)
         cover = override or album.cover_asset_id
         if cover:
-            desired[f"{folder}/{FOLDER_IMAGE}"] = DesiredImage(album.id, cover, "cover", folder)
+            desired[f"{folder}/{FOLDER_IMAGE}"] = DesiredImage(album.id, cover, "cover", folder, self._version)
+
+    @property
+    def _version(self) -> str:
+        return images.VERSION if self.crop else "original"
+
+    def _faces(self, photo_id: str) -> list:
+        if not self._faces_ok:
+            return []
+        try:
+            return self.client.faces(photo_id)
+        except ImmichError as e:
+            # e.g. the key lacks face.read: crop without faces rather than not at all
+            log.warning("couldn't read faces from Immich (%s); cropping without them this pass", e)
+            self._faces_ok = False
+            return []
 
     # ---------------------------------------------------------------- remove
     def _item_rel_of(self, rel: str, row: OwnedFile, owned: dict[str, OwnedFile]) -> str | None:
@@ -354,17 +368,17 @@ class Syncer:
                 log.warning("%s was changed since this tool wrote it; not touching it", rel)
                 report.conflicts += 1
                 return
-            if row.asset_id == d.photo_id:
-                return                               # already the right image
+            if row.asset_id == d.key:
+                return                               # already the right image, rendered the same way
         try:
             data, ctype = self.client.thumbnail(d.photo_id, "preview")
-            jpeg = to_jpeg(data, ctype)
+            jpeg = images.prepare(data, ctype, self._faces(d.photo_id) if self.crop else None, crop=self.crop)
         except (ImmichError, OSError, ValueError) as e:
             log.error("%s: couldn't fetch image %s: %s (keeping what's there)", rel, d.photo_id, e)
             return
         self._make_dirs(os.path.dirname(rel), d.album_id)
         self._act("write image", rel, d.photo_id)
-        self._write(p, jpeg, OwnedFile(rel, d.album_id, d.photo_id, d.kind, hashlib.sha256(jpeg).hexdigest()))
+        self._write(p, jpeg, OwnedFile(rel, d.album_id, d.key, d.kind, hashlib.sha256(jpeg).hexdigest()))
         report.images_written += 1
         report.images_changed.add(d.item_rel)
 
