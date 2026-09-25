@@ -76,11 +76,14 @@ class JellyfinClient:
                 return out
             start += self.PAGE
 
-    def refresh_images(self, item_id: str) -> None:
-        # Same as the web UI's "Refresh metadata" with "Replace existing images".
+    def refresh(self, item_id: str, images: bool, metadata: bool) -> None:
+        # Same as the web UI's "Refresh metadata" with "Replace all metadata" and/or
+        # "Replace existing images". Neither resets watched state.
         self._req("POST", f"/Items/{item_id}/Refresh", params={
-            "metadataRefreshMode": "Default", "imageRefreshMode": "FullRefresh",
-            "replaceAllMetadata": "false", "replaceAllImages": "true",
+            "metadataRefreshMode": "FullRefresh" if metadata else "Default",
+            "imageRefreshMode": "FullRefresh" if images else "Default",
+            "replaceAllMetadata": str(metadata).lower(),
+            "replaceAllImages": str(images).lower(),
         })
 
     def media_updated(self, updates: list[tuple[str, str]]) -> None:
@@ -96,19 +99,20 @@ class NotifyResult:
     not_found: list[str] = field(default_factory=list)
 
 
-def notify(jf: JellyfinClient, created: list[str], removed: list[str], images_changed: set[str]) -> NotifyResult:
-    """Tell Jellyfin what changed. `images_changed` holds the rel paths of the items (videos or
-    album folders) whose image changed; those already known to Jellyfin get an image refresh,
-    the rest are new and pick their images up when Jellyfin first scans them."""
+def notify(jf: JellyfinClient, created: list[str], removed: list[str], images_changed: set[str],
+           metadata_changed: set[str] = frozenset()) -> NotifyResult:
+    """Tell Jellyfin what changed. `images_changed` / `metadata_changed` hold the rel paths of the
+    items (videos or album folders) whose image / NFO changed; items Jellyfin already knows get one
+    refresh covering both, the rest are new and pick everything up on their first scan."""
     res = NotifyResult()
     updates = [(jf.path(r), "Created") for r in created] + [(jf.path(r), "Deleted") for r in removed]
-    to_refresh = set(images_changed) - set(created) - set(removed)
+    to_refresh = (set(images_changed) | set(metadata_changed)) - set(created) - set(removed)
     if to_refresh:
         ids = jf.item_ids_by_path(jf.library_id()[0])
         for rel in sorted(to_refresh):
             item = ids.get(jf.path(rel))
             if item:
-                jf.refresh_images(item)
+                jf.refresh(item, images=rel in images_changed, metadata=rel in metadata_changed)
                 res.refreshed += 1
             else:
                 res.not_found.append(rel)

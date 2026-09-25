@@ -39,6 +39,7 @@ class Asset:
     is_trashed: bool
     is_offline: bool
     duration_ms: int | None = None
+    description: str = ""
 
     @property
     def visible(self) -> bool:
@@ -66,6 +67,7 @@ def _asset(d: dict) -> Asset:
         is_trashed=bool(d.get("isTrashed")),
         is_offline=bool(d.get("isOffline")),
         duration_ms=d.get("duration") if isinstance(d.get("duration"), (int, float)) else None,
+        description=((d.get("exifInfo") or {}).get("description") or "").strip(),
     )
 
 
@@ -74,6 +76,7 @@ class ImmichClient:
     MAX_PAGES = 400
 
     def __init__(self, url: str, api_key: str, timeout: float = 30.0, transport: httpx.BaseTransport | None = None):
+        self._with_exif = True      # ask search for exifInfo (descriptions); dropped if Immich rejects it
         self._http = httpx.Client(
             base_url=url,
             headers={"x-api-key": api_key, "Accept": "application/json"},
@@ -119,10 +122,17 @@ class ImmichClient:
         out: list[Asset] = []
         page = 1
         for _ in range(self.MAX_PAGES):
-            data = self._request(
-                "POST", "/api/search/metadata",
-                json={"albumIds": [album_id], "type": asset_type, "page": page, "size": self.PAGE_SIZE},
-            )
+            body = {"albumIds": [album_id], "type": asset_type, "page": page, "size": self.PAGE_SIZE}
+            if self._with_exif and asset_type == "VIDEO":
+                body["withExif"] = True
+            try:
+                data = self._request("POST", "/api/search/metadata", json=body)
+            except ImmichError as e:
+                if "withExif" in body and "HTTP 400" in str(e):
+                    log.warning("Immich rejected withExif; continuing without video descriptions (%s)", e)
+                    self._with_exif = False
+                    continue
+                raise
             assets = (data or {}).get("assets")
             if not isinstance(assets, dict) or not isinstance(assets.get("items"), list):
                 raise ImmichError("search/metadata: response has no assets.items")

@@ -62,6 +62,12 @@ Confirmed on Jellyfin 12.1 (Home Videos and Photos library):
 | Album folder | `folder.jpg` |
 | Video | `<video file name without extension>.jpg` |
 
+| Title, date, description | `<video file name without extension>.nfo` |
+
+The NFO title is the video's original file name (e.g. `Tanis & Mark Wedding`), the date is when it
+was recorded, and the description comes from Immich's info panel. Edit a description in Immich and
+the NFO is rewritten on the next sync; edit an NFO by hand and it's left alone.
+
 Images are Immich's preview size, converted to JPEG if Immich serves WebP, and written atomically.
 The sha256 of each image is recorded; if you replace one with your own file, it is never
 overwritten or deleted. If a chosen photo leaves the album, the choice is cleared and the default

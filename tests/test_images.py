@@ -19,12 +19,14 @@ FOLDER = "Tanis and Mark Wedding"
 LINK = f"{FOLDER}/2018-07-28 Tanis & Mark Wedding [cf7586e2].mp4"
 POSTER = f"{FOLDER}/2018-07-28 Tanis & Mark Wedding [cf7586e2].jpg"
 FOLDER_JPG = f"{FOLDER}/folder.jpg"
+NFO = f"{FOLDER}/2018-07-28 Tanis & Mark Wedding [cf7586e2].nfo"
 
 
-def asset(id, type, name, disk_name=None):
+def asset(id, type, name, disk_name=None, description=""):
     # Immich's storage template can write '&amp;' into the file on disk while the display name keeps '&'
     return Asset(id=id, type=type, original_path=f"/data/library/mark/2018/07/{disk_name or name}", original_file_name=name,
-                 local_date_time="2018-07-28T19:51:01.114Z", visibility="timeline", is_trashed=False, is_offline=False)
+                 local_date_time="2018-07-28T19:51:01.114Z", visibility="timeline", is_trashed=False, is_offline=False,
+                 description=description)
 
 
 def jpeg_of(tag):
@@ -202,7 +204,8 @@ def test_images_written_atomically_leave_no_temp_files(env):
     out, state, fake, run = env
     state.set_poster("A1", VID, P1)
     run()
-    assert sorted(os.listdir(out / FOLDER)) == sorted([os.path.basename(LINK), os.path.basename(POSTER), "folder.jpg"])
+    assert sorted(os.listdir(out / FOLDER)) == sorted([os.path.basename(LINK), os.path.basename(POSTER),
+                                                       os.path.basename(NFO), "folder.jpg"])
 
 
 # ------------------------------------------------------------- Jellyfin
@@ -255,3 +258,103 @@ def test_notify_unknown_library_path_is_an_error():
         return httpx.Response(204)
     with pytest.raises(JellyfinError):
         notify(jf_client(handler), [], [], {FOLDER})
+
+
+# ------------------------------------------------------------------ NFO
+
+import xml.etree.ElementTree as ET
+
+
+def test_nfo_has_title_date_and_escapes_ampersand(env):
+    out, state, fake, run = env
+    r = run()
+    raw = (out / NFO).read_bytes()
+    assert b"Tanis &amp; Mark Wedding" in raw                  # valid XML
+    root = ET.fromstring(raw)
+    assert root.tag == "movie"
+    assert root.findtext("title") == "Tanis & Mark Wedding"    # what Jellyfin displays
+    assert root.findtext("premiered") == "2018-07-28" and root.findtext("year") == "2018"
+    assert root.find("plot") is None                           # no description in Immich
+    assert LINK in r.created_links                             # new video: notify() announces it rather than
+                                                               # refreshing it; Jellyfin reads the NFO on first scan
+
+
+def test_description_change_rewrites_nfo_and_refreshes_metadata(env):
+    out, state, fake, run = env
+    run()
+    fake.videos = [asset(VID, "VIDEO", "Tanis & Mark Wedding.mp4", disk_name="Tanis &amp; Mark Wedding.mp4",
+                         description="First dance & speeches")]
+    r = run()
+    assert ET.fromstring((out / NFO).read_bytes()).findtext("plot") == "First dance & speeches"
+    assert r.nfos_written == 1 and r.metadata_changed == {LINK} and not r.images_changed
+
+
+def test_unchanged_nfo_is_not_rewritten(env):
+    out, state, fake, run = env
+    run()
+    r = run()
+    assert r.nfos_written == 0 and not r.metadata_changed
+
+
+def test_hand_edited_nfo_is_kept(env):
+    out, state, fake, run = env
+    run()
+    (out / NFO).write_text("<movie><title>My own title</title></movie>")
+    fake.videos = [asset(VID, "VIDEO", "Tanis & Mark Wedding.mp4", disk_name="Tanis &amp; Mark Wedding.mp4",
+                         description="changed in Immich")]
+    r = run()
+    assert "My own title" in (out / NFO).read_text() and r.conflicts == 1
+
+
+def test_nfo_removed_with_its_video(env):
+    out, state, fake, run = env
+    run()
+    fake.videos = []
+    r = run()
+    assert not (out / NFO).exists() and r.nfos_removed == 1
+
+
+def test_one_refresh_per_item_covering_both_changes():
+    calls = []
+
+    def handler(req):
+        calls.append((req.url.path, dict(req.url.params)))
+        if req.url.path == "/Library/VirtualFolders":
+            return httpx.Response(200, json=[{"Name": "HV", "ItemId": "LIB", "Locations": ["/immich-sync"]}])
+        if req.url.path == "/Items":
+            return httpx.Response(200, json={"Items": [{"Id": "VID1", "Path": f"/immich-sync/{LINK}"},
+                                                       {"Id": "DIR1", "Path": f"/immich-sync/{FOLDER}"}]})
+        return httpx.Response(204)
+
+    notify(jf_client(handler), [], [], images_changed={LINK, FOLDER}, metadata_changed={LINK})
+    refreshes = {path: params for path, params in calls if path.endswith("/Refresh")}
+    assert refreshes["/Items/VID1/Refresh"]["replaceAllMetadata"] == "true"
+    assert refreshes["/Items/VID1/Refresh"]["replaceAllImages"] == "true"
+    assert refreshes["/Items/DIR1/Refresh"]["replaceAllMetadata"] == "false"
+    assert len(refreshes) == 2
+
+
+def test_client_falls_back_when_immich_rejects_with_exif():
+    from immich_jellyfin_sync.immich import ImmichClient
+    bodies = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        bodies.append(body)
+        if body.get("withExif"):
+            return httpx.Response(400, json={"message": "property withExif should not exist"})
+        return httpx.Response(200, json={"assets": {"items": [{
+            "id": "v1", "type": "VIDEO", "originalPath": "/data/a.mov", "originalFileName": "a.mov",
+            "localDateTime": "2020-01-01T00:00:00Z", "visibility": "timeline"}], "nextPage": None}})
+
+    c = ImmichClient("http://immich", "k", transport=httpx.MockTransport(handler))
+    assert [v.id for v in c.album_videos("A")] == ["v1"]
+    assert [v.id for v in c.album_videos("A")] == ["v1"]
+    assert [b.get("withExif") for b in bodies] == [True, None, None]   # asked once, then stopped
+
+
+def test_description_read_from_exif_info():
+    from immich_jellyfin_sync.immich import _asset
+    a = _asset({"id": "v", "type": "VIDEO", "originalPath": "/data/a.mov", "originalFileName": "a.mov",
+                "exifInfo": {"description": "  Lake day  "}})
+    assert a.description == "Lake day"

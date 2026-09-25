@@ -162,7 +162,7 @@ def test_hidden_trashed_photos_and_outside_prefix_are_skipped(env):
     ]
     r = run()
     assert r.created == 1 and r.skipped_assets == 4
-    assert os.listdir(out / "Wedding") == ["2020-01-02 archived [a1].mov"]
+    assert sorted(os.listdir(out / "Wedding")) == ["2020-01-02 archived [a1].mov", "2020-01-02 archived [a1].nfo"]
 
 
 def test_dry_run_changes_nothing(env):

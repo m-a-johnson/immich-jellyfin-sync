@@ -57,11 +57,11 @@ class SyncService:
                         log.exception("on_sync callback failed")
 
     def _tell_jellyfin(self, r) -> str | None:
-        if self.jellyfin is None or not (r.created_links or r.removed_links or r.images_changed):
+        if self.jellyfin is None or not (r.created_links or r.removed_links or r.images_changed or r.metadata_changed):
             return None
         try:
-            res = notify(self.jellyfin, r.created_links, r.removed_links, r.images_changed)
-            log.info("told Jellyfin: %d path update(s), %d image refresh(es)", res.announced, res.refreshed)
+            res = notify(self.jellyfin, r.created_links, r.removed_links, r.images_changed, r.metadata_changed)
+            log.info("told Jellyfin: %d path update(s), %d item refresh(es)", res.announced, res.refreshed)
             if res.not_found:
                 log.info("not in Jellyfin yet (will get images on first scan): %s", res.not_found)
             return None

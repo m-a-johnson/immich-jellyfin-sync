@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import tempfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 from .config import Paths
@@ -42,9 +43,22 @@ def video_filename(a: Asset) -> str:
     return f"{date} {clean_name(stem)} [{a.id[:8]}]{ext}"
 
 
-def poster_rel(video_rel: str) -> str:
-    """Jellyfin 12 reads a video's image from '<video file name without extension>.jpg'."""
-    return os.path.splitext(video_rel)[0] + ".jpg"
+def sidecar_rel(video_rel: str, ext: str) -> str:
+    return os.path.splitext(video_rel)[0] + ext
+
+
+def nfo_xml(a: Asset) -> bytes:
+    """Jellyfin reads '<video name>.nfo' in Home Videos libraries (confirmed on 12.1)."""
+    root = ET.Element("movie")
+    ET.SubElement(root, "title").text = a.title
+    if _DATE.match(a.local_date_time):
+        ET.SubElement(root, "premiered").text = a.local_date_time[:10]
+        ET.SubElement(root, "year").text = a.local_date_time[:4]
+    if a.description:
+        ET.SubElement(root, "plot").text = a.description
+    ET.indent(root)
+    body = ET.tostring(root, encoding="unicode")          # escapes & < > for us
+    return ('<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n' + body + "\n").encode("utf-8")
 
 
 def jellyfin_target(original_path: str, paths: Paths) -> str | None:
@@ -97,6 +111,15 @@ class DesiredImage:
     item_rel: str      # the Jellyfin item this image belongs to (video link or album folder)
 
 
+@dataclass(frozen=True)
+class DesiredNfo:
+    album_id: str
+    asset_id: str
+    content: bytes
+    item_rel: str
+    kind: str = "nfo"
+
+
 @dataclass
 class Report:
     created: int = 0
@@ -108,11 +131,14 @@ class Report:
     dirs_removed: int = 0
     images_written: int = 0
     images_removed: int = 0
+    nfos_written: int = 0
+    nfos_removed: int = 0
     failed_albums: list[str] = field(default_factory=list)
     # for telling Jellyfin
     created_links: list[str] = field(default_factory=list)
     removed_links: list[str] = field(default_factory=list)
     images_changed: set[str] = field(default_factory=set)
+    metadata_changed: set[str] = field(default_factory=set)
 
     @property
     def linked(self) -> int:
@@ -122,7 +148,8 @@ class Report:
         s = (f"created={self.created} replaced={self.replaced} removed={self.removed} "
              f"unchanged={self.unchanged} conflicts={self.conflicts} "
              f"skipped_assets={self.skipped_assets} dirs_removed={self.dirs_removed} "
-             f"images_written={self.images_written} images_removed={self.images_removed}")
+             f"images_written={self.images_written} images_removed={self.images_removed} "
+             f"nfos_written={self.nfos_written} nfos_removed={self.nfos_removed}")
         if self.failed_albums:
             s += f" failed_albums={self.failed_albums}"
         return s
@@ -159,7 +186,7 @@ class Syncer:
         active = [present[i] for i in sorted(enabled & present.keys())]
         folders = album_folders(active, self.state.owned_dirs())
 
-        desired: dict[str, Desired | DesiredImage] = {}
+        desired: dict[str, Desired | DesiredImage | DesiredNfo] = {}
         frozen: set[str] = set()
         for album in active:
             try:
@@ -184,6 +211,8 @@ class Syncer:
         for rel, d in sorted(desired.items(), key=lambda kv: (kv[1].kind != "video", kv[0])):
             if isinstance(d, DesiredImage):
                 self._ensure_image(rel, d, owned.get(rel), report)
+            elif isinstance(d, DesiredNfo):
+                self._ensure_nfo(rel, d, owned.get(rel), report)
             else:
                 self._ensure_link(rel, d, owned.get(rel), report)
 
@@ -206,6 +235,7 @@ class Syncer:
                 continue
             rel = f"{folder}/{video_filename(a)}"
             desired[rel] = Desired(album.id, a.id, target)
+            desired[sidecar_rel(rel, ".nfo")] = DesiredNfo(album.id, a.id, nfo_xml(a), rel)
             video_rels[a.id] = rel
         if not video_rels:
             return                          # nothing in Jellyfin for this album: no folder image either
@@ -230,7 +260,7 @@ class Syncer:
 
         for video_id, photo_id in posters.items():
             vrel = video_rels[video_id]
-            desired[poster_rel(vrel)] = DesiredImage(album.id, photo_id, "poster", vrel)
+            desired[sidecar_rel(vrel, ".jpg")] = DesiredImage(album.id, photo_id, "poster", vrel)
         cover = override or album.cover_asset_id
         if cover:
             desired[f"{folder}/{FOLDER_IMAGE}"] = DesiredImage(album.id, cover, "cover", folder)
@@ -260,18 +290,23 @@ class Syncer:
         else:
             if os.path.isfile(p) and not os.path.islink(p):
                 if sha256(p) == row.target:
-                    self._act("remove image", rel)
+                    self._act("remove nfo" if row.kind == "nfo" else "remove image", rel)
                     if not self.dry_run:
                         os.unlink(p)
-                    report.images_removed += 1
                     item = self._item_rel_of(rel, row, owned)
-                    if item:
-                        report.images_changed.add(item)
+                    if row.kind == "nfo":
+                        report.nfos_removed += 1
+                        if item:
+                            report.metadata_changed.add(item)
+                    else:
+                        report.images_removed += 1
+                        if item:
+                            report.images_changed.add(item)
                 else:
                     log.warning("%s was changed since this tool wrote it; leaving it untouched", rel)
                     report.conflicts += 1
             elif os.path.lexists(p):
-                log.warning("%s is no longer the image this tool wrote; leaving it untouched", rel)
+                log.warning("%s is no longer the file this tool wrote; leaving it untouched", rel)
                 report.conflicts += 1
         if not self.dry_run:
             self.state.forget_file(rel)
@@ -329,20 +364,45 @@ class Syncer:
             return
         self._make_dirs(os.path.dirname(rel), d.album_id)
         self._act("write image", rel, d.photo_id)
-        if not self.dry_run:
-            fd, tmp = tempfile.mkstemp(prefix=".ijs-", suffix=".tmp", dir=os.path.dirname(p))
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    f.write(jpeg)
-                os.chmod(tmp, 0o644)
-                os.replace(tmp, p)                   # atomic: Jellyfin never sees half a file
-            except BaseException:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
-                raise
-            self._record(OwnedFile(rel, d.album_id, d.photo_id, d.kind, hashlib.sha256(jpeg).hexdigest()))
+        self._write(p, jpeg, OwnedFile(rel, d.album_id, d.photo_id, d.kind, hashlib.sha256(jpeg).hexdigest()))
         report.images_written += 1
         report.images_changed.add(d.item_rel)
+
+    # ------------------------------------------------------------------- nfo
+    def _ensure_nfo(self, rel: str, d: DesiredNfo, row: OwnedFile | None, report: Report) -> None:
+        p = self._abs(rel)
+        want = hashlib.sha256(d.content).hexdigest()
+        if os.path.lexists(p):
+            if row is None or row.kind != "nfo":
+                log.warning("%s exists but was not created by this tool; not touching it", rel)
+                report.conflicts += 1
+                return
+            if os.path.islink(p) or not os.path.isfile(p) or sha256(p) != row.target:
+                log.warning("%s was edited since this tool wrote it; not touching it", rel)
+                report.conflicts += 1
+                return
+            if row.target == want:
+                return                               # already up to date
+        self._act("write nfo", rel)
+        self._write(p, d.content, OwnedFile(rel, d.album_id, d.asset_id, "nfo", want))
+        report.nfos_written += 1
+        report.metadata_changed.add(d.item_rel)
+
+    def _write(self, p: str, data: bytes, record: OwnedFile) -> None:
+        """Write atomically (Jellyfin never sees half a file) and record ownership."""
+        if self.dry_run:
+            return
+        fd, tmp = tempfile.mkstemp(prefix=".ijs-", suffix=".tmp", dir=os.path.dirname(p))
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, p)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        self._record(record)
 
     # ----------------------------------------------------------------- utils
     def _record(self, f: OwnedFile) -> None:
