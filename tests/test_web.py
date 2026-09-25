@@ -230,3 +230,27 @@ def test_tags_unavailable_is_null_not_an_error(ctx):
     c, fake, *_ = ctx
     fake.tags_down = True
     assert c.get(f"/api/albums/{AID}").json()["videos"][0]["tags"] is None
+
+
+def test_title_endpoint(ctx):
+    c, fake, svc, db = ctx
+    url = f"/api/albums/{AID}/videos/{VID}/title"
+    r = c.put(url, json={"title": "  Our   Wedding "}, headers=H).json()
+    assert r == {"videoId": VID, "title": "Our Wedding", "titleChosen": True}
+    v = c.get(f"/api/albums/{AID}").json()["videos"][0]
+    assert v["title"] == "Our Wedding" and v["immichTitle"] == "Tanis & Mark Wedding"
+    r = c.put(url, json={"title": "Tanis & Mark Wedding"}, headers=H).json()    # same as Immich: no override kept
+    assert r["titleChosen"] is False
+    assert c.put(url, json={"title": ""}, headers=H).status_code == 400
+
+
+def test_people_page_and_roles(ctx):
+    c, fake, svc, db = ctx
+    c.put(f"/api/albums/{AID}", json={"enabled": True}, headers=H)
+    assert c.get("/api/people").json() == [{"name": "Mark", "role": None, "videos": 1},
+                                           {"name": "Tanis", "role": None, "videos": 1}]
+    assert c.put("/api/people/role", json={"name": "Tanis", "role": " Mom "}, headers=H).json() == {"name": "Tanis", "role": "Mom"}
+    assert c.get("/api/people").json()[1]["role"] == "Mom"
+    c.put("/api/people/role", json={"name": "Tanis", "role": ""}, headers=H)           # empty clears it
+    assert c.get("/api/people").json()[1]["role"] is None
+    assert c.put("/api/people/role", json={"name": "Tanis", "role": "x" * 61}, headers=H).status_code == 400

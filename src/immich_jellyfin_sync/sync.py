@@ -48,10 +48,12 @@ def sidecar_rel(video_rel: str, ext: str) -> str:
     return os.path.splitext(video_rel)[0] + ext
 
 
-def nfo_xml(a: Asset, people: list[str] = (), tags: list[str] = ()) -> bytes:
+def nfo_xml(a: Asset, people: list[str] = (), tags: list[str] = (), title: str | None = None,
+            roles: dict[str, str] | None = None) -> bytes:
     """Jellyfin reads '<video name>.nfo' in Home Videos libraries (confirmed on 12.1)."""
+    roles = roles or {}
     root = ET.Element("movie")
-    ET.SubElement(root, "title").text = a.title
+    ET.SubElement(root, "title").text = title or a.title
     if _DATE.match(a.local_date_time):
         ET.SubElement(root, "premiered").text = a.local_date_time[:10]
         ET.SubElement(root, "year").text = a.local_date_time[:4]
@@ -62,6 +64,8 @@ def nfo_xml(a: Asset, people: list[str] = (), tags: list[str] = ()) -> bytes:
     for name in people:
         actor = ET.SubElement(root, "actor")
         ET.SubElement(actor, "name").text = name
+        if roles.get(name):
+            ET.SubElement(actor, "role").text = roles[name]      # Jellyfin shows "as <role>"
         ET.SubElement(actor, "type").text = "Actor"
     ET.indent(root)
     body = ET.tostring(root, encoding="unicode")          # escapes & < > for us
@@ -231,6 +235,7 @@ class Syncer:
 
     def _plan_album(self, album: Album, folder: str, desired: dict, report: Report) -> None:
         video_rels: dict[str, str] = {}    # video asset id -> link rel
+        roles = self.state.roles()
         for a in self.client.album_videos(album.id):
             if not a.syncable:
                 report.skipped_assets += 1
@@ -252,7 +257,8 @@ class Syncer:
                 self.keep.add(nfo)
                 tags = []
             added, hidden = self.state.people_changes(a.id)
-            desired[nfo] = DesiredNfo(album.id, a.id, nfo_xml(a, merge_people(a.people, added, hidden), tags), rel)
+            desired[nfo] = DesiredNfo(album.id, a.id, nfo_xml(a, merge_people(a.people, added, hidden), tags,
+                                                              self.state.title(a.id), roles), rel)
             video_rels[a.id] = rel
         if not video_rels:
             return                          # nothing in Jellyfin for this album: no folder image either

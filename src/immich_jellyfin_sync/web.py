@@ -89,6 +89,15 @@ class CoverBody(BaseModel):
     photoId: str | None = None
 
 
+class TitleBody(BaseModel):
+    title: str | None = None
+
+
+class RoleBody(BaseModel):
+    name: str
+    role: str | None = None
+
+
 class PersonBody(BaseModel):
     action: str        # add | remove | restore
     name: str
@@ -99,6 +108,13 @@ def _clean_person(name: str) -> str:
     if not 1 <= len(name) <= 80:
         raise HTTPException(400, "Names must be 1 to 80 characters")
     return name
+
+
+def _clean_text(value: str, what: str, max_len: int) -> str:
+    value = " ".join(_CONTROL.sub(" ", value).split())
+    if not 1 <= len(value) <= max_len:
+        raise HTTPException(400, f"{what} must be 1 to {max_len} characters")
+    return value
 
 
 def people_view(immich_names, added: set[str], hidden: set[str]) -> dict:
@@ -200,10 +216,50 @@ def create_app(client, state_path, service, crop: bool = True) -> FastAPI:
             "folderImageId": override or a.cover_asset_id, "folderImageChosen": override is not None,
             "enabled": a.id in state.enabled_album_ids(),
             "knownPeople": known,
-            "videos": [{"id": v.id, "title": v.title, "date": v.local_date_time[:10],
+            "videos": [{"id": v.id, "title": state.title(v.id) or v.title, "immichTitle": v.title,
+                        "titleChosen": state.title(v.id) is not None, "date": v.local_date_time[:10],
                         "durationMs": v.duration_ms, "posterId": posters.get(v.id),
                         "tags": tags[v.id], **people[v.id]} for v in videos],
         }
+
+    @app.put("/api/albums/{album_id}/videos/{video_id}/title", dependencies=[Depends(_same_origin)])
+    def set_title(album_id: str, video_id: str, body: TitleBody, state: State = Depends(db)):
+        _check_id(album_id), _check_id(video_id)
+        video = next((v for v in immich(client.album_videos, album_id) if v.id == video_id and v.syncable), None)
+        if video is None:
+            raise HTTPException(400, "That video isn't in this album")
+        title = None if body.title is None else _clean_text(body.title, "Titles", 200)
+        state.set_title(video_id, None if title == video.title else title)
+        service.trigger()
+        chosen = state.title(video_id)
+        return {"videoId": video_id, "title": chosen or video.title, "titleChosen": chosen is not None}
+
+    @app.get("/api/people")
+    def people(state: State = Depends(db)):
+        """Everyone who appears in a video that syncs, with their role and video count."""
+        enabled = state.enabled_album_ids()
+        counts: dict[str, int] = {}
+        seen: set[str] = set()
+        for a in immich(client.albums):
+            if a.id not in enabled:
+                continue
+            for v in immich(client.album_videos, a.id):
+                if not v.syncable or v.id in seen:
+                    continue
+                seen.add(v.id)
+                for n in merge_people(v.people, *state.people_changes(v.id)):
+                    counts[n] = counts.get(n, 0) + 1
+        roles = state.roles()
+        return [{"name": n, "role": roles.get(n), "videos": c}
+                for n, c in sorted(counts.items(), key=lambda kv: kv[0].casefold())]
+
+    @app.put("/api/people/role", dependencies=[Depends(_same_origin)])
+    def set_role(body: RoleBody, state: State = Depends(db)):
+        name = _clean_text(body.name, "Names", 80)
+        role = None if body.role is None or not body.role.strip() else _clean_text(body.role, "Roles", 60)
+        state.set_role(name, role)
+        service.trigger()
+        return {"name": name, "role": role}
 
     @app.post("/api/albums/{album_id}/videos/{video_id}/people", dependencies=[Depends(_same_origin)])
     def change_person(album_id: str, video_id: str, body: PersonBody, state: State = Depends(db)):

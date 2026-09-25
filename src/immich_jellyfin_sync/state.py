@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS people_hidden (   -- Immich names you removed from a 
     name           TEXT NOT NULL,
     PRIMARY KEY (video_asset_id, name)
 );
+CREATE TABLE IF NOT EXISTS titles (          -- title set in the app instead of Immich's file name
+    video_asset_id TEXT PRIMARY KEY,
+    title          TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS person_roles (    -- shown under the name in Jellyfin ("as Nonno")
+    name TEXT PRIMARY KEY,
+    role TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS dirs (
     path     TEXT PRIMARY KEY,
     album_id TEXT NOT NULL
@@ -158,6 +166,29 @@ class State:
 
     def restore_person(self, video_id: str, name: str) -> None:
         self.db.execute("DELETE FROM people_hidden WHERE video_asset_id = ? AND name = ?", (video_id, name))
+        self.db.commit()
+
+    # titles
+    def title(self, video_id: str) -> str | None:
+        r = self.db.execute("SELECT title FROM titles WHERE video_asset_id = ?", (video_id,)).fetchone()
+        return r[0] if r else None
+
+    def set_title(self, video_id: str, title: str | None) -> None:
+        if title is None:
+            self.db.execute("DELETE FROM titles WHERE video_asset_id = ?", (video_id,))
+        else:
+            self.db.execute("INSERT OR REPLACE INTO titles (video_asset_id, title) VALUES (?, ?)", (video_id, title))
+        self.db.commit()
+
+    # roles
+    def roles(self) -> dict[str, str]:
+        return dict(self.db.execute("SELECT name, role FROM person_roles"))
+
+    def set_role(self, name: str, role: str | None) -> None:
+        if role is None:
+            self.db.execute("DELETE FROM person_roles WHERE name = ?", (name,))
+        else:
+            self.db.execute("INSERT OR REPLACE INTO person_roles (name, role) VALUES (?, ?)", (name, role))
         self.db.commit()
 
 

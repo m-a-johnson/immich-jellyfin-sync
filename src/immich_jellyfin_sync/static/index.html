@@ -34,7 +34,11 @@ button, input { font: inherit; color: inherit; }
 
 /* header */
 header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-bottom: 28px; }
-header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; margin: 0; flex: 1 1 auto; }
+header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+header.top nav { display: flex; gap: 4px; flex: 1 1 auto; }
+header.top nav a { color: var(--ink-soft); text-decoration: none; font-weight: 550; padding: 4px 10px; border-radius: 999px; }
+header.top nav a:hover { color: var(--ink); }
+header.top nav a[aria-current="page"] { color: var(--ink); background: var(--mount); box-shadow: inset 0 0 0 1px var(--mount-edge); }
 .status { color: var(--ink-soft); font-size: 0.87rem; }
 .status.bad { color: var(--pencil); }
 
@@ -118,6 +122,15 @@ header.top h1 { font-size: 1.45rem; font-weight: 650; letter-spacing: -0.01em; m
   font-size: 0.82rem; color: var(--ink-soft); cursor: pointer; line-height: 1.6; }
 .chip-add:hover { color: var(--ink); border-color: var(--ink-soft); }
 .chip input { border: 0; outline: none; background: none; width: 14ch; padding: 0; font-size: 0.82rem; }
+.titlerow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.titlerow input { font: inherit; font-weight: 600; font-size: 1rem; padding: 3px 6px; border: 1px solid var(--mount-edge);
+  border-radius: 4px; min-width: 0; width: min(36ch, 100%); }
+.people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 640px; }
+.person { display: grid; grid-template-columns: 1fr minmax(150px, 220px); align-items: center; gap: 12px;
+  background: var(--mount); border: 1px solid var(--mount-edge); border-radius: var(--radius-mount); padding: 10px 14px; }
+.person strong { display: block; font-weight: 600; }
+.person .meta { color: var(--ink-soft); font-size: 0.82rem; }
+.person input { font: inherit; padding: 5px 8px; border: 1px solid var(--mount-edge); border-radius: 4px; width: 100%; background: #fff; }
 .subtle { font-size: 0.8rem; color: var(--ink-soft); margin-top: 6px; }
 .subtle button { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink-soft); text-decoration: underline; font-size: inherit; }
 .subtle button:hover { color: var(--ink); }
@@ -165,6 +178,10 @@ dialog::backdrop { background: rgba(29,40,51,.45); }
 <div class="wrap">
   <header class="top">
     <h1>Home videos for Jellyfin</h1>
+    <nav aria-label="Sections">
+      <a href="#/" id="navAlbums">Albums</a>
+      <a href="#/people" id="navPeople">People</a>
+    </nav>
     <span class="status" id="status" aria-live="polite"></span>
     <button class="btn" id="syncNow" type="button">Sync now</button>
   </header>
@@ -415,6 +432,44 @@ async function showAlbum(id) {
 
   $("#knownPeople").replaceChildren(...(a.knownPeople || []).map((n) => h("option", { value: n })));
 
+  // Title shown in Jellyfin: Immich's file name unless you set one here.
+  const titleCell = (v) => {
+    const box = h("div");
+    const save = async (title) => {
+      try {
+        const r = await api("PUT", `api/albums/${a.id}/videos/${v.id}/title`, { title });
+        v.title = r.title; v.titleChosen = r.titleChosen;
+        toast(r.titleChosen ? "Title saved" : "Using Immich's file name");
+        setTimeout(refreshStatus, 2000);
+      } catch (e) { toast(e.message); }
+      view();
+    };
+    const view = () => box.replaceChildren(h("div", { class: "titlerow" },
+      h("h3", {}, v.title),
+      h("button", { class: "link", type: "button", onclick: edit }, "Edit title"),
+      v.titleChosen ? h("button", { class: "link", type: "button", title: `Immich's name: ${v.immichTitle}`,
+        onclick: () => save(null) }, "Use Immich's name") : null));
+    const edit = () => {
+      const input = h("input", { type: "text", value: v.title, maxlength: "200", "aria-label": "Title in Jellyfin" });
+      let finished = false;
+      const done = (keep) => {
+        if (finished) return;
+        finished = true;
+        const t = input.value.trim();
+        if (keep && t && t !== v.title) save(t); else view();
+      };
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); done(true); }
+        if (e.key === "Escape") done(false);
+      });
+      input.addEventListener("blur", () => done(true));
+      box.replaceChildren(h("div", { class: "titlerow" }, input));
+      input.focus(); input.select();
+    };
+    view();
+    return box;
+  };
+
   // People in the video: Immich's names plus your own; removing an Immich name hides it for this video.
   const peopleCell = (v) => {
     const box = h("div");
@@ -474,7 +529,7 @@ async function showAlbum(id) {
     ? h("ul", { class: "videos" }, a.videos.map((v) => h("li", { class: "video" },
         h("div", { class: "frame" }, img(v.id, "")),
         h("div", {},
-          h("h3", {}, v.title),
+          titleCell(v),
           h("div", { class: "meta" }, [fmtDate(v.date), fmtDuration(v.durationMs)].filter(Boolean).join(", ")),
           peopleCell(v)),
         posterCell(v))))
@@ -554,10 +609,52 @@ async function openPicker({ album, title, intro, currentId, clearLabel, save }) 
   mark();
 }
 
+/* ---------- people ---------- */
+async function showPeople() {
+  const view = $("#view");
+  view.replaceChildren(h("p", { class: "empty" }, "Loading people…"));
+  let people;
+  try { people = await api("GET", "api/people"); }
+  catch (e) { view.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "Couldn't load people"), e.message)); return; }
+  const intro = h("p", { class: "note" },
+    "Everyone in the videos you send to Jellyfin. A role appears under their name in Jellyfin, such as “as Nonno”; ",
+    "leave it empty to show “Actor”.");
+  if (!people.length) {
+    view.replaceChildren(intro, h("div", { class: "empty" }, h("strong", {}, "No people yet"),
+      "Name people in Immich, or add them to a video on its album page."));
+    return;
+  }
+  const row = (p) => {
+    const input = h("input", { type: "text", value: p.role || "", maxlength: "60", placeholder: "Role, e.g. Nonno",
+      "aria-label": `Role for ${p.name}` });
+    const save = async () => {
+      const role = input.value.trim() || null;
+      if ((role || null) === (p.role || null)) return;
+      try {
+        const r = await api("PUT", "api/people/role", { name: p.name, role });
+        p.role = r.role;
+        toast(role ? `${p.name}: “${role}”` : `${p.name}: back to “Actor”`);
+        setTimeout(refreshStatus, 2000);
+      } catch (e) { toast(e.message); input.value = p.role || ""; }
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+    input.addEventListener("blur", save);
+    return h("li", { class: "person" },
+      h("div", {}, h("strong", {}, p.name), h("span", { class: "meta" }, `In ${p.videos} video${p.videos === 1 ? "" : "s"}`)),
+      input);
+  };
+  view.replaceChildren(intro, h("ul", { class: "people-list" }, people.map(row)));
+}
+
 /* ---------- routing ---------- */
 function route() {
   const m = location.hash.match(/^#\/album\/([\w-]+)$/);
-  if (m) showAlbum(m[1]); else showAlbums();
+  const onPeople = location.hash === "#/people";
+  $("#navAlbums").toggleAttribute("aria-current", !onPeople);
+  $("#navPeople").toggleAttribute("aria-current", onPeople);
+  if (!onPeople) $("#navAlbums").setAttribute("aria-current", "page");
+  if (onPeople) $("#navPeople").setAttribute("aria-current", "page");
+  if (onPeople) showPeople(); else if (m) showAlbum(m[1]); else showAlbums();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);

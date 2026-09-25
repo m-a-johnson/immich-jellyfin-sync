@@ -79,7 +79,11 @@ tag filters:
   If tags can't be read, the video's existing NFO is kept as-is rather than rewritten without them.
 - Names and tags are sorted, so Immich returning them in another order never rewrites an NFO.
 
-Names you add live in this app's state DB (`/config/state.db`), not in Immich.
+- **Roles**: set once per person on the **People** page (e.g. "Nonno"); Jellyfin shows "as Nonno"
+  under their name on every video instead of "Actor".
+- **Titles**: each video's title is Immich's file name unless you set one on its album page.
+
+Names, roles and titles you add live in this app's state DB (`/config/state.db`), not in Immich.
 
 The NFO title is the video's original file name (e.g. `Tanis & Mark Wedding`), the date is when it
 was recorded, and the description comes from Immich's info panel. Edit a description in Immich and

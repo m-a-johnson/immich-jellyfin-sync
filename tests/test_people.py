@@ -127,3 +127,26 @@ def test_tags_use_last_part_of_nested_tags():
                                                   {"value": "Events/Birthday"}, {"name": ""}]})
     c = ImmichClient("http://immich", "k", transport=httpx.MockTransport(handler))
     assert c.tags("v") == ["BC", "Birthday"]
+
+
+def test_title_override_and_back(env):
+    out, state, fake, run = env
+    run()
+    state.set_title(VID, "Fairmont Hot Springs")
+    r = run()
+    assert ET.fromstring((out / NFO).read_bytes()).findtext("title") == "Fairmont Hot Springs"
+    assert r.metadata_changed == {"Vacations/2025-07-31 Fairmont 2025 [0dc71829].mp4"}
+    state.set_title(VID, None)
+    run()
+    assert ET.fromstring((out / NFO).read_bytes()).findtext("title") == "Fairmont 2025"
+
+
+def test_roles_written_once_per_person_across_videos(env):
+    out, state, fake, run = env
+    run()
+    state.set_role("Tanis", "Mom")
+    r = run()
+    actors = {a.findtext("name"): a.findtext("role") for a in ET.fromstring((out / NFO).read_bytes()).findall("actor")}
+    assert actors == {"Evie": None, "Mark": None, "Tanis": "Mom"}
+    assert r.nfos_written == 1
+    assert run().nfos_written == 0                                  # stable afterwards
