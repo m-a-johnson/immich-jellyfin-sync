@@ -17,6 +17,13 @@ people with roles), people's faces from Immich, and a web UI for all of it.
 - [ ] **Link back to Immich from Jellyfin**: a small Jellyfin plugin that registers the `immich`
   provider id (already written to every NFO as `<uniqueid type="immich">` and stored by Jellyfin)
   with a URL pattern like `https://<immich>/photos/{id}`, so the web UI shows an Immich link.
+- [ ] **Backups of your choices**: JSON export/import of what can't be recreated (album choices,
+  posters, folder images, titles, people added/hidden, roles), automatic daily exports to
+  `/config/backups/`, and *adopting* files already on disk after a restore (a link or NFO identical
+  to what would be written is taken back into ownership instead of becoming a conflict).
+- [ ] **Faster locking of new people**: when a pass finds people Jellyfin hasn't created yet, retry
+  the people step within minutes instead of waiting for the next sync, so new names aren't left
+  unlocked (and open to online matches) for up to 30 minutes.
 - [ ] **Preview of a sync**: show what the next sync would change before it runs (design to be decided).
 
 ## How it works
